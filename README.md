@@ -1,0 +1,246 @@
+# SwiftChain-Backend
+
+**SwiftChain-Backend** is the core API service for **SwiftChain**, a Blockchain-Powered Logistics & Escrow Delivery Platform. It connects individuals, businesses, and independent drivers in a decentralized logistics economy, ensuring trust through escrow payments and smart contracts.
+
+---
+
+## 📌 Business Overview
+
+**SwiftChain** revolutionizes logistics by enabling existing transport assets (motorcycles, trucks, independent couriers) to participate in a shared economy. It addresses trust issues in delivery services through blockchain-powered escrow mechanisms.
+
+### Core Problem Solved
+Traditional logistics are often centralized, expensive, and lack trust between unknown parties. SwiftChain bridges this gap by locking payments in escrow until delivery is confirmed.
+
+### Financial Inclusion Benefits
+The platform empowers:
+- **Small Logistics Operators & Drivers**: Access to a steady stream of delivery requests.
+- **Underserved Communities**: Access to global payments via Stellar's borderless network.
+- **Cross-Border Merchants**: Seamless settlement for international goods movement.
+
+### Target Market
+- 🌍 **African Logistics Markets**
+- 🏢 **SMEs & E-commerce Merchants**
+- 🛵 **Courier Startups & Independent Drivers**
+- 🚢 **Cross-Border Trade Facilitators**
+
+### Revenue Model
+1. **Delivery Commission Fees**: Percentage of each successful delivery.
+2. **Escrow Service Charges**: Small fee for securing the transaction.
+3. **Enterprise Logistics APIs**: Subscription for high-volume business integration.
+4. **Cross-Border Settlement Fees**: Currency conversion and transfer fees.
+5. **Premium Analytics**: Insights for fleet owners and businesses.
+
+---
+
+## 🏗 System Architecture
+
+SwiftChain operates as a distributed system across three repositories:
+
+1.  **SwiftChain-Frontend**: Next.js + TypeScript + TailwindCSS (User Interface)
+2.  **SwiftChain-Backend**: Node.js + Express.js + TypeScript + MongoDB (Core Logic)
+3.  **SwiftChain-SmartContract**: Stellar Soroban + Rust (Escrow & Trust)
+
+### Backend Responsibilities
+The backend serves as the central hub connecting the frontend, database, and blockchain layers. Key responsibilities include:
+- **REST API** for platform operations.
+- **Authentication & Authorization** (JWT, RBAC).
+- **Delivery & Shipment Management** (CRUD, Tracking).
+- **Driver Assignment Algorithms**.
+- **File Upload Services** (Receipts, Proof of Delivery).
+- **Real-Time Updates** (WebSockets/Polling).
+- **Blockchain Integration Layer** (Stellar/Soroban events).
+
+---
+
+## 🛠 Technology Stack
+
+- **Runtime**: Node.js
+- **Framework**: Express.js
+- **Language**: TypeScript
+- **Database**: MongoDB (with Mongoose ODM)
+- **Authentication**: JWT (JSON Web Tokens)
+- **Validation**: Zod
+- **File Storage**: Cloudinary / AWS S3
+- **Real-Time**: Socket.io / Polling
+- **Documentation**: Swagger / OpenAPI
+- **Logging**: Winston
+- **Containerization**: Docker & Docker Compose
+- **CI/CD**: GitHub Actions
+
+---
+
+## 🚀 Functional Requirements
+
+### 1. Authentication & Roles
+- **Users**: Register, Login, Create Requests.
+- **Drivers**: Register, Verify, Accept Jobs.
+- **Admins**: Platform Management.
+- **Security**: JWT-based stateless auth with Role-Based Access Control (RBAC).
+
+### 2. Delivery Operations
+- **Create Delivery**: Customer details, pickup/drop-off locations, package info.
+- **Delivery List**: Filtering, pagination, and status tracking.
+- **Status Workflow**: Pending -> Assigned -> Picked Up -> In Transit -> Delivered.
+
+### 3. Driver Assignment
+- Mechanism to assign available drivers to pending delivery requests.
+
+### 4. Shipments & Escrow
+- **Shipment Tracking**: Detailed tracking of goods.
+- **Escrow Logic**: Integration with Stellar Smart Contracts to lock/release funds based on delivery status.
+
+### 5. File Uploads
+- Secure upload of delivery receipts, images, and documents (PDF/JPG).
+
+---
+
+## 📡 API Endpoints
+
+### Authentication
+- `POST /auth/register` - Register a new user/driver.
+- `POST /auth/login` - Authenticate and retrieve token.
+
+### Deliveries
+- `POST /deliveries` - Create a new delivery request.
+- `GET /deliveries` - Retrieve a list of deliveries (with filters).
+- `PUT /deliveries/:id/assign` - Assign a driver to a delivery.
+
+### Shipments
+- `POST /shipments` - Create a shipment record.
+- `GET /shipments` - Get shipment details.
+
+### Uploads
+- `POST /uploads` - Upload proof of delivery or documents.
+
+---
+
+## 🗺 Development Roadmap
+
+### Phase 1 — MVP (Minimal Logistics Backend)
+- [ ] Authentication System (Register/Login/JWT).
+- [ ] Core Delivery CRUD Endpoints.
+- [ ] Driver Assignment Logic.
+- [ ] MongoDB Schema Design.
+- [ ] Basic Validation & Error Handling.
+
+### Phase 2 — Escrow Payment Integration
+- [ ] Stellar Payment Service Integration.
+- [ ] Escrow Payment Initiation Endpoints.
+- [ ] Transaction Tracking.
+- [ ] Payment Verification Webhooks.
+
+### Phase 3 — Smart Contract Integration
+- [ ] Soroban Smart Contract Interaction Layer.
+- [ ] Blockchain Event Listeners.
+- [ ] Escrow Release Verification Logic.
+- [ ] Delivery Proof Validation on Chain.
+
+### Phase 4 — Platform Scaling
+- [ ] Logistics Analytics & Reporting APIs.
+- [ ] Fleet Management Features.
+- [ ] Reputation & Scoring System for Drivers.
+- [ ] Cross-Border Payment Logic.
+- [ ] Advanced Monitoring (Prometheus/Grafana).
+
+---
+
+## 📂 Project Structure
+
+```bash
+SwiftChain-Backend/
+├── .github/
+│   └── workflows/
+│       └── ci.yml          # GitHub Actions CI pipeline
+├── docs/                   # Documentation files
+├── postman/                # Postman collections
+├── scripts/                # Utility scripts (seed, migration)
+├── src/
+│   ├── config/             # Environment & App Config
+│   ├── controllers/        # Request Handlers
+│   ├── services/           # Business Logic
+│   ├── routes/             # API Route Definitions
+│   ├── middlewares/        # Express Middlewares (Auth, Error, Validation)
+│   ├── models/             # Mongoose Models
+│   ├── repositories/       # Data Access Layer
+│   ├── validators/         # Zod/Joi Schemas
+│   ├── utils/              # Helper Functions
+│   ├── types/              # TypeScript Type Definitions
+│   ├── interfaces/         # TypeScript Interfaces
+│   ├── events/             # Event Emitters/Handlers
+│   ├── sockets/            # WebSocket Handlers
+│   ├── uploads/            # File Upload Logic
+│   ├── blockchain/         # Stellar/Soroban Integration
+│   ├── database/           # DB Connection Logic
+│   ├── app.ts              # Express App Setup
+│   └── server.ts           # Entry Point
+├── tests/                  # Unit & Integration Tests
+├── .env.example            # Environment Variables Example
+├── .eslintrc               # Linter Config
+├── .prettierrc             # Formatter Config
+├── docker-compose.yml      # Docker Services
+├── Dockerfile              # Docker Build Instructions
+├── package.json            # Dependencies & Scripts
+├── tsconfig.json           # TypeScript Config
+└── README.md               # Project Documentation
+```
+
+---
+
+## ⚙️ Installation & Setup
+
+### Prerequisites
+- Node.js v18+
+- MongoDB v6.0+
+- Docker (Optional)
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/your-org/SwiftChain-Backend.git
+cd SwiftChain-Backend
+```
+
+### 2. Environment Configuration
+Copy the example environment file and update the values.
+```bash
+cp .env.example .env
+```
+
+### 3. Install Dependencies
+```bash
+npm install
+```
+
+### 4. Run Development Server
+```bash
+npm run dev
+```
+
+### 5. Run with Docker
+```bash
+docker-compose up --build
+```
+
+---
+
+## 🧪 Testing
+
+Run the test suite using Jest:
+```bash
+npm test
+```
+
+---
+
+## 🤝 Contribution
+
+1. Fork the repository.
+2. Create a feature branch (`git checkout -b feature/amazing-feature`).
+3. Commit your changes (`git commit -m 'Add some amazing feature'`).
+4. Push to the branch (`git push origin feature/amazing-feature`).
+5. Open a Pull Request.
+
+---
+
+## 📄 License
+
+This project is licensed under the ISC License.
