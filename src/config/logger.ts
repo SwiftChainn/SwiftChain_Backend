@@ -8,7 +8,7 @@ const levels = {
   debug: 4,
 };
 
-const level = () => {
+const level = (): string => {
   const env = process.env.NODE_ENV || 'development';
   const isDevelopment = env === 'development';
   return process.env.LOG_LEVEL || (isDevelopment ? 'debug' : 'warn');
@@ -27,9 +27,7 @@ winston.addColors(colors);
 const format = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss:ms' }),
   winston.format.colorize({ all: true }),
-  winston.format.printf(
-    (info) => `${info.timestamp} ${info.level}: ${info.message}`,
-  ),
+  winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}`),
 );
 
 const transports = [

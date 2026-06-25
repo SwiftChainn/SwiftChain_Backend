@@ -14,10 +14,12 @@ const app = express();
 app.use(helmet());
 
 // CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || '*',
+    credentials: true,
+  }),
+);
 
 // Rate limiting
 const limiter = rateLimit({
@@ -47,7 +49,7 @@ app.get('/health', (req, res) => {
     status: 'success',
     message: 'SwiftChain-Backend is running',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
   });
 });
 
@@ -58,7 +60,7 @@ app.use('/api/v1', routes);
 app.use('*', (req, res) => {
   res.status(404).json({
     status: 'error',
-    message: `Cannot ${req.method} ${req.originalUrl}`
+    message: `Cannot ${req.method} ${req.originalUrl}`,
   });
 });
 

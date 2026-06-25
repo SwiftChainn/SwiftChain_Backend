@@ -2,9 +2,9 @@ name: SwiftChain Backend CI
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: ['main', 'develop']
   pull_request:
-    branches: [ "main", "develop" ]
+    branches: ['main', 'develop']
 
 jobs:
   build:
@@ -16,36 +16,36 @@ jobs:
         mongodb-version: ['6.0']
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: 9
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'pnpm'
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
 
-    - name: Start MongoDB
-      uses: supercharge/mongodb-github-action@1.11.0
-      with:
-        mongodb-version: ${{ matrix.mongodb-version }}
+      - name: Start MongoDB
+        uses: supercharge/mongodb-github-action@1.11.0
+        with:
+          mongodb-version: ${{ matrix.mongodb-version }}
 
-    - name: Install dependencies
-      run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-    - name: Linting
-      run: pnpm run lint
+      - name: Linting
+        run: pnpm run lint
 
-    - name: Build
-      run: pnpm run build
+      - name: Build
+        run: pnpm run build
 
-    - name: Run Tests
-      run: pnpm test
-      env:
-        CI: true
-        MONGO_URI: mongodb://localhost:27017/swiftchain_test
-        JWT_SECRET: test_secret
+      - name: Run Tests
+        run: pnpm test
+        env:
+          CI: true
+          MONGO_URI: mongodb://localhost:27017/swiftchain_test
+          JWT_SECRET: test_secret

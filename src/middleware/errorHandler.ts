@@ -5,7 +5,7 @@ interface AppError extends Error {
   statusCode?: number;
 }
 
-const errorHandler = (err: AppError, req: Request, res: Response, next: NextFunction) => {
+const errorHandler = (err: AppError, req: Request, res: Response, _next: NextFunction): void => {
   const statusCode = err.statusCode || 500;
   const message = err.message || 'Internal Server Error';
 
