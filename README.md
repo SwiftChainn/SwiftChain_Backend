@@ -1,6 +1,6 @@
-# SwiftChain-Backend
+# SwiftChain_Backend
 
-**SwiftChain-Backend** is the core API service for **SwiftChain**, a Blockchain-Powered Logistics & Escrow Delivery Platform. It connects individuals, businesses, and independent drivers in a decentralized logistics economy, ensuring trust through escrow payments and smart contracts.
+**SwiftChain_Backend** is the core API service for **SwiftChain**, a Blockchain-Powered Logistics & Escrow Delivery Platform. It connects individuals, businesses, and independent drivers in a decentralized logistics economy, ensuring trust through escrow payments and smart contracts.
 
 ---
 
@@ -36,9 +36,9 @@ The platform empowers:
 
 SwiftChain operates as a distributed system across three repositories:
 
-1.  **SwiftChain-Frontend**: Next.js + TypeScript + TailwindCSS (User Interface)
-2.  **SwiftChain-Backend**: Node.js + Express.js + TypeScript + MongoDB (Core Logic)
-3.  **SwiftChain-SmartContract**: Stellar Soroban + Rust (Escrow & Trust)
+1.  **SwiftChain_Frontend**: Next.js + TypeScript + TailwindCSS (User Interface)
+2.  **SwiftChain_Backend**: Node.js + Express.js + TypeScript + MongoDB (Core Logic)
+3.  **SwiftChain_SmartContract**: Stellar Soroban + Rust (Escrow & Trust)
 
 ### Backend Responsibilities
 The backend serves as the central hub connecting the frontend, database, and blockchain layers. Key responsibilities include:
@@ -147,7 +147,7 @@ The backend serves as the central hub connecting the frontend, database, and blo
 ## 📂 Project Structure
 
 ```bash
-SwiftChain-Backend/
+SwiftChain_Backend/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml          # GitHub Actions CI pipeline
@@ -195,8 +195,8 @@ SwiftChain-Backend/
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-org/SwiftChain-Backend.git
-cd SwiftChain-Backend
+git clone https://github.com/your-org/SwiftChain_Backend.git
+cd SwiftChain_Backend
 ```
 
 ### 2. Environment Configuration
@@ -207,12 +207,12 @@ cp .env.example .env
 
 ### 3. Install Dependencies
 ```bash
-npm install
+pnpm install
 ```
 
 ### 4. Run Development Server
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 ### 5. Run with Docker
@@ -226,7 +226,7 @@ docker-compose up --build
 
 Run the test suite using Jest:
 ```bash
-npm test
+pnpm test
 ```
 
 ---
