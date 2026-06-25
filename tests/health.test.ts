@@ -1,5 +1,4 @@
 import request from 'supertest';
-import express from 'express';
 import app from '../src/app';
 
 // Mock the database connection to prevent open handles during tests
@@ -18,7 +17,7 @@ jest.mock('../src/config/logger', () => ({
 describe('Health Check API', () => {
   it('should return 200 OK and status success', async () => {
     const res = await request(app).get('/health');
-    
+
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('status', 'success');
     expect(res.body).toHaveProperty('message', 'SwiftChain-Backend is running');
