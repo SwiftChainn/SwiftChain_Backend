@@ -3,6 +3,7 @@ import { Server as HttpServer } from 'http';
 import logger from '../config/logger';
 import { socketService } from './socket.service';
 import { registerSyncHandler } from './syncHandler';
+import { registerLocationHandler } from './locationHandler';
 import {
   PongPayload,
   ServerToClientEvents,
@@ -64,6 +65,9 @@ export function initializeSocketServer(httpServer: HttpServer): TypedServer {
 
     // ── offline sync handler ─────────────────────────────────────────────────
     registerSyncHandler(socket);
+
+    // ── real-time location broadcast handler ─────────────────────────────────
+    registerLocationHandler(io, socket);
 
     // ── pong handler ────────────────────────────────────────────────────────
     socket.on('pong', (payload: PongPayload) => {

@@ -98,6 +98,57 @@ export interface LocationSyncAck {
   results: SyncItemResult[];
 }
 
+// ─── Real-time location broadcast types ──────────────────────────────────────
+
+/**
+ * Payload sent by a driver on the `driver_location_update` event.
+ * Carries a live GPS fix tied to a specific delivery.
+ */
+export interface DriverLocationUpdatePayload {
+  /** MongoDB ObjectId string of the delivery this update belongs to. */
+  deliveryId: string;
+  /** Latitude in decimal degrees (-90 to +90). */
+  lat: number;
+  /** Longitude in decimal degrees (-180 to +180). */
+  lng: number;
+  /**
+   * Client-side timestamp (ms since epoch) at which the fix was captured.
+   * Defaults to server receive time if omitted.
+   */
+  capturedAt?: number;
+}
+
+/**
+ * Payload broadcast to all subscribers of a delivery room on
+ * the `location:update` event.
+ */
+export interface LocationBroadcastPayload {
+  /** MongoDB ObjectId string of the delivery being tracked. */
+  deliveryId: string;
+  /** Driver's MongoDB ObjectId string. */
+  driverId: string;
+  /** Latitude at time of fix. */
+  lat: number;
+  /** Longitude at time of fix. */
+  lng: number;
+  /** Client-side timestamp (ms since epoch). */
+  capturedAt: number;
+  /** ISO timestamp of when the server received and persisted the update. */
+  receivedAt: string;
+}
+
+/**
+ * Acknowledgement sent back to the driver after a live update is processed.
+ */
+export interface LocationUpdateAck {
+  /** Whether the update was successfully persisted. */
+  success: boolean;
+  /** The persisted location record's MongoDB _id (for client reconciliation). */
+  locationId?: string;
+  /** Error message when success === false. */
+  error?: string;
+}
+
 /**
  * Events that the server emits to clients.
  */
@@ -105,6 +156,10 @@ export interface ServerToClientEvents {
   ping: (payload: PingPayload) => void;
   disconnect_notice: (payload: DisconnectPayload) => void;
   location_sync_ack: (payload: LocationSyncAck) => void;
+  /** Broadcast to all clients in a delivery room when the driver moves. */
+  'location:update': (payload: LocationBroadcastPayload) => void;
+  /** Ack sent back to the driver after a live location update is processed. */
+  location_update_ack: (payload: LocationUpdateAck) => void;
 }
 
 /**
@@ -116,6 +171,8 @@ export interface ClientToServerEvents {
   leave_room: (room: string) => void;
   /** Fired by driver upon reconnection to flush offline-buffered updates. */
   location_sync: (payload: LocationSyncPayload) => void;
+  /** Fired by driver to broadcast a live GPS fix to a delivery room. */
+  driver_location_update: (payload: DriverLocationUpdatePayload) => void;
 }
 
 /**
