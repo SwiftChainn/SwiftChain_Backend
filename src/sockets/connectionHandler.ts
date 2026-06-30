@@ -2,6 +2,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import logger from '../config/logger';
 import { socketService } from './socket.service';
+import { registerSyncHandler } from './syncHandler';
 import {
   PongPayload,
   ServerToClientEvents,
@@ -60,6 +61,9 @@ export function initializeSocketServer(httpServer: HttpServer): TypedServer {
 
     // Register the connection in the service layer
     socketService.registerConnection(socket, userId);
+
+    // ── offline sync handler ─────────────────────────────────────────────────
+    registerSyncHandler(socket);
 
     // ── pong handler ────────────────────────────────────────────────────────
     socket.on('pong', (payload: PongPayload) => {

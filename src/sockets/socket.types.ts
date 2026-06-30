@@ -43,12 +43,68 @@ export interface DisconnectPayload {
   connectedDurationMs: number;
 }
 
+// ─── Offline sync types ───────────────────────────────────────────────────────
+
+/**
+ * A single buffered location point captured while the driver was offline.
+ */
+export interface OfflineLocationPoint {
+  /** Client-side timestamp (ms since epoch) at which the fix was taken. */
+  capturedAt: number;
+  /** Latitude in decimal degrees. */
+  lat: number;
+  /** Longitude in decimal degrees. */
+  lng: number;
+  /** Optional delivery the driver was working on at capture time. */
+  deliveryId?: string;
+}
+
+/**
+ * Payload sent by a driver on the `location:sync` event upon reconnection.
+ */
+export interface LocationSyncPayload {
+  /**
+   * Ordered array of location points buffered offline.
+   * The service will deduplicate and process them in chronological order.
+   */
+  updates: OfflineLocationPoint[];
+}
+
+/**
+ * Per-item result within a sync acknowledgement.
+ */
+export interface SyncItemResult {
+  capturedAt: number;
+  status: 'saved' | 'duplicate' | 'invalid' | 'error';
+  /** Populated when status === 'error' or 'invalid'. */
+  reason?: string;
+}
+
+/**
+ * Acknowledgement payload emitted back on `location:sync_ack`.
+ */
+export interface LocationSyncAck {
+  /** ISO timestamp of when the server processed the batch. */
+  processedAt: string;
+  /** Total number of points received. */
+  received: number;
+  /** Number of points successfully persisted. */
+  saved: number;
+  /** Number of duplicate points skipped. */
+  duplicates: number;
+  /** Number of points that failed validation or persistence. */
+  failed: number;
+  /** Per-item results for full client-side reconciliation. */
+  results: SyncItemResult[];
+}
+
 /**
  * Events that the server emits to clients.
  */
 export interface ServerToClientEvents {
   ping: (payload: PingPayload) => void;
   disconnect_notice: (payload: DisconnectPayload) => void;
+  location_sync_ack: (payload: LocationSyncAck) => void;
 }
 
 /**
@@ -58,6 +114,8 @@ export interface ClientToServerEvents {
   pong: (payload: PongPayload) => void;
   join_room: (room: string) => void;
   leave_room: (room: string) => void;
+  /** Fired by driver upon reconnection to flush offline-buffered updates. */
+  location_sync: (payload: LocationSyncPayload) => void;
 }
 
 /**
