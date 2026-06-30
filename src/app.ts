@@ -1,73 +1,47 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
-import helmet from 'helmet';
-import compression from 'compression';
-import rateLimit from 'express-rate-limit';
-import { connectDatabase } from './config/database';
-import logger from './config/logger';
-import errorHandler from './middleware/errorHandler';
+import dotenv from 'dotenv';
 import routes from './routes';
+import logger from './config/logger';
+
+dotenv.config();
 
 const app = express();
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/swiftchain';
 
-// Security middleware
-app.use(helmet());
+app.use(cors());
+app.use(express.json());
 
-// CORS configuration
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || '*',
-    credentials: true,
-  }),
-);
+app.use('/api', routes);
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api', limiter);
-
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Compression
-app.use(compression());
-
-// Logging middleware
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`);
-  next();
-});
-
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
-    status: 'success',
-    message: 'SwiftChain-Backend is running',
+    status: 'healthy',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
   });
 });
 
-// API routes
-app.use('/api/v1', routes);
-
-// 404 handler
-app.use('*', (req, res) => {
+app.use((req, res) => {
   res.status(404).json({
-    status: 'error',
-    message: `Cannot ${req.method} ${req.originalUrl}`,
+    success: false,
+    error: `Route ${req.path} not found`,
   });
 });
 
-// Global error handler
-app.use(errorHandler);
+// Connect to MongoDB but don't start the server here
+const connectDB = async () => {
+  try {
+    await mongoose.connect(MONGODB_URI);
+    logger.info('✅ Connected to MongoDB');
+  } catch (error) {
+    logger.error('❌ Failed to connect to MongoDB:', error);
+    process.exit(1);
+  }
+};
 
-// Database connection
-connectDatabase();
+// Call connectDB but don't listen
+connectDB();
 
 export default app;

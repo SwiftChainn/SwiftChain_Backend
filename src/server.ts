@@ -3,9 +3,11 @@ import logger from './config/logger';
 
 const PORT = process.env.PORT || 3000;
 
+// Start the server from here
 const server = app.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+  logger.info(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
   logger.info(`📝 Health check: http://localhost:${PORT}/health`);
+  logger.info(`📦 ETA endpoint: http://localhost:${PORT}/api/v1/deliveries/:id/eta`);
 });
 
 // Graceful shutdown
