@@ -1,5 +1,6 @@
 import app from './app';
 import logger from './config/logger';
+import initSocket from './sockets';
 
 const PORT = process.env.PORT || 3000;
 
@@ -8,12 +9,28 @@ const server = app.listen(PORT, () => {
   logger.info(`📝 Health check: http://localhost:${PORT}/health`);
 });
 
+// Initialize Socket.io
+const io = initSocket(server);
+
 // Graceful shutdown
 const gracefulShutdown = (): void => {
   logger.info('Received shutdown signal, closing gracefully...');
 
+  // Close HTTP server
   server.close(() => {
     logger.info('HTTP server closed');
+
+    // Close socket.io if present
+    try {
+      if (io && typeof io.close === 'function') {
+        // close all sockets
+        // @ts-ignore
+        io.close(() => logger.info('Socket.io server closed'));
+      }
+    } catch (err) {
+      logger.warn('Error while closing Socket.io', err);
+    }
+
     import('mongoose').then(({ default: mongoose }) => {
       mongoose.connection.close(false).then(() => {
         logger.info('MongoDB connection closed');
