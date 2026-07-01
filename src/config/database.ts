@@ -5,7 +5,12 @@ export const connectDatabase = async (): Promise<void> => {
   try {
     const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/swiftchain';
 
-    await mongoose.connect(mongoUri);
+    await mongoose.connect(mongoUri, {
+      maxPoolSize: 10, // Maximum number of connections in the pool
+      minPoolSize: 2, // Minimum number of connections in the pool
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
+    });
 
     logger.info('✅ Connected to MongoDB successfully');
 
@@ -15,6 +20,20 @@ export const connectDatabase = async (): Promise<void> => {
 
     mongoose.connection.on('disconnected', () => {
       logger.warn('MongoDB disconnected');
+    });
+
+    mongoose.connection.on('reconnected', () => {
+      logger.info('✅ MongoDB reconnected');
+    });
+
+    mongoose.connection.on('connected', () => {
+      logger.info(`MongoDB connected to ${mongoose.connection.host}`);
+    });
+
+    process.on('SIGINT', async () => {
+      await mongoose.connection.close();
+      logger.info('MongoDB connection closed through app termination');
+      process.exit(0);
     });
   } catch (error) {
     logger.error('❌ Failed to connect to MongoDB:', error);

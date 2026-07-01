@@ -12,7 +12,8 @@
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write .",
-    "test": "jest"
+    "test": "jest",
+    "prepare": "husky install"
   },
   "dependencies": {
     "bcryptjs": "2.4.3",
@@ -53,5 +54,11 @@
     "ts-jest": "^29.4.11",
     "ts-node": "10.9.2",
     "typescript": "5.2.2"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ]
   }
 }
