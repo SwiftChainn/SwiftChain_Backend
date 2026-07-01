@@ -1,22 +1,86 @@
 import { Request, Response, NextFunction } from 'express';
+import { Error as MongooseError } from 'mongoose';
 import logger from '../config/logger';
+import env from '../config/env';
+import { AppError } from '../errors/AppError';
 
-interface AppError extends Error {
-  statusCode?: number;
-}
+const handleCastErrorDB = (err: MongooseError.CastError): AppError => {
+  const message = `Invalid ${err.path}: ${err.value}.`;
+  return new AppError(message, 400);
+};
 
-const errorHandler = (err: AppError, req: Request, res: Response, _next: NextFunction): void => {
-  const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+const handleDuplicateFieldsDB = (err: { errmsg?: string; code?: number }): AppError => {
+  const value = err.errmsg?.match(/(["'])(\\?.)*?\1/)?.[0] || '';
+  const message = `Duplicate field value: ${value}. Please use another value!`;
+  return new AppError(message, 400);
+};
 
-  logger.error(`${statusCode} - ${message} - ${req.originalUrl} - ${req.method} - ${req.ip}`);
+const handleValidationErrorDB = (err: MongooseError.ValidationError): AppError => {
+  const errors = Object.values(err.errors).map((el) => el.message);
+  const message = `Invalid input data. ${errors.join('. ')}`;
+  return new AppError(message, 400);
+};
 
-  res.status(statusCode).json({
+const sendErrorDev = (err: AppError, _req: Request, res: Response): void => {
+  res.status(err.statusCode).json({
     status: 'error',
-    statusCode,
-    message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : {},
+    error: err,
+    message: err.message,
+    stack: err.stack,
   });
+};
+
+const sendErrorProd = (err: AppError, _req: Request, res: Response): void => {
+  if (err.isOperational) {
+    res.status(err.statusCode).json({
+      status: 'error',
+      message: err.message,
+    });
+  } else {
+    logger.error('ERROR 💥', err);
+
+    res.status(500).json({
+      status: 'error',
+      message: 'Something went very wrong!',
+    });
+  }
+};
+
+const errorHandler = (
+  err: Error & {
+    statusCode?: number;
+    name?: string;
+    code?: number;
+    errmsg?: string;
+    errors?: Record<string, MongooseError.ValidatorError>;
+  },
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): void => {
+  let error: AppError;
+
+  if (err.name === 'CastError') {
+    error = handleCastErrorDB(err as MongooseError.CastError);
+  } else if (err.code === 11000) {
+    error = handleDuplicateFieldsDB(err);
+  } else if (err.name === 'ValidationError') {
+    error = handleValidationErrorDB(err as MongooseError.ValidationError);
+  } else if (err instanceof AppError) {
+    error = err;
+  } else {
+    error = new AppError(err.message || 'Internal Server Error', err.statusCode || 500);
+  }
+
+  logger.error(
+    `${error.statusCode} - ${error.message} - ${req.originalUrl} - ${req.method} - ${req.ip}`,
+  );
+
+  if (env.NODE_ENV === 'development') {
+    sendErrorDev(error, req, res);
+  } else {
+    sendErrorProd(error, req, res);
+  }
 };
 
 export default errorHandler;
