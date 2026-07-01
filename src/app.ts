@@ -11,8 +11,9 @@ import env from './config/env';
 
 const app = express();
 
-// Security middleware
-app.use(helmet());
+// Trust the first proxy (load balancer / reverse proxy) so that
+// secure headers and rate limiting use the correct client IP.
+app.set('trust proxy', 1);
 
 // CORS configuration
 app.use(
