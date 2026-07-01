@@ -269,7 +269,7 @@ pnpm test
 
 ---
 
-linked PR 5,4
+linked PR 5,4,6
 
 ## 📄 License
 

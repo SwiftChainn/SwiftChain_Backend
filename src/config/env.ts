@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
-import logger from './logger';
 
 dotenv.config();
 
@@ -23,12 +22,12 @@ try {
   env = envSchema.parse(process.env);
 } catch (error) {
   if (error instanceof z.ZodError) {
-    logger.error('❌ Invalid environment variables:');
-    error.issues.forEach((err) => {
-      logger.error(`  - ${err.path.join('.')}: ${err.message}`);
+    console.error('❌ Invalid environment variables:');
+    error.issues.forEach((issue) => {
+      console.error(`  - ${issue.path.join('.')}: ${issue.message}`);
     });
   } else {
-    logger.error('❌ Failed to parse environment variables:', error);
+    console.error('❌ Failed to parse environment variables:', error);
   }
   process.exit(1);
 }

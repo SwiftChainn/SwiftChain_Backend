@@ -4,9 +4,8 @@ import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { connectDatabase } from './config/database';
-import logger from './config/logger';
-import { corsOptionsDelegate, helmetOptions } from './config/security';
 import errorHandler from './middleware/errorHandler';
+import requestLogger from './middleware/requestLogger';
 import routes from './routes';
 import env from './config/env';
 
@@ -40,11 +39,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Compression
 app.use(compression());
 
-// Logging middleware
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`);
-  next();
-});
+// Request logging middleware
+app.use(requestLogger);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
