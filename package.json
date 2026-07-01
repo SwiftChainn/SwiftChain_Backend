@@ -15,9 +15,6 @@
     "test": "jest",
     "prepare": "husky install"
   },
-  "mongodbMemoryServer": {
-    "version": "7.0.14"
-  },
   "dependencies": {
     "bcryptjs": "2.4.3",
     "compression": "1.7.4",
