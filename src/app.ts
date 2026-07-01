@@ -8,6 +8,7 @@ import logger from './config/logger';
 import { corsOptionsDelegate, helmetOptions } from './config/security';
 import errorHandler from './middleware/errorHandler';
 import routes from './routes';
+import env from './config/env';
 
 const app = express();
 
@@ -15,16 +16,18 @@ const app = express();
 // secure headers and rate limiting use the correct client IP.
 app.set('trust proxy', 1);
 
-// Secure HTTP headers (Helmet)
-app.use(helmet(helmetOptions));
-
-// Cross-Origin Resource Sharing restricted to the configured frontend origins
-app.use(cors(corsOptionsDelegate));
+// CORS configuration
+app.use(
+  cors({
+    origin: env.CORS_ORIGIN,
+    credentials: true,
+  }),
+);
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.RATE_LIMIT_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
 });
