@@ -4,27 +4,29 @@ import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { connectDatabase } from './config/database';
-import logger from './config/logger';
 import errorHandler from './middleware/errorHandler';
+import requestLogger from './middleware/requestLogger';
 import routes from './routes';
+import env from './config/env';
 
 const app = express();
 
-// Security middleware
-app.use(helmet());
+// Trust the first proxy (load balancer / reverse proxy) so that
+// secure headers and rate limiting use the correct client IP.
+app.set('trust proxy', 1);
 
 // CORS configuration
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: env.CORS_ORIGIN,
     credentials: true,
   }),
 );
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.RATE_LIMIT_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -37,11 +39,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Compression
 app.use(compression());
 
-// Logging middleware
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`);
-  next();
-});
+// Request logging middleware
+app.use(requestLogger);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
