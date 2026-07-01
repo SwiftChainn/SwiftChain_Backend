@@ -1,66 +1,100 @@
-import { Schema, model, type Document, type Model } from 'mongoose';
+import { Schema, model, Document, Types } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-const DEFAULT_BCRYPT_ROUNDS = 10;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// ─── Enums ────────────────────────────────────────────────────────────────────
 
-export type UserRole = 'user' | 'admin';
+export enum UserRole {
+  ADMIN = 'admin',
+  USER = 'user',
+  DRIVER = 'driver',
+}
 
-/**
- * Plain user properties as stored in the database.
- */
-export interface IUser {
+export enum UserStatus {
+  ACTIVE = 'active',
+  SUSPENDED = 'suspended',
+  BANNED = 'banned',
+}
+
+// ─── Document interface ────────────────────────────────────────────────────────
+
+export interface IUser extends Document {
+  _id: Types.ObjectId;
   name: string;
   email: string;
   password: string;
   role: UserRole;
+  status: UserStatus;
+  stellarAddress?: string;
+  suspendedAt?: Date;
+  suspendedReason?: string;
   createdAt: Date;
   updatedAt: Date;
-}
 
-/**
- * Mongoose document for a user, including instance methods.
- */
-export interface IUserDocument extends IUser, Document {
+  /** Returns true when the plain-text password matches the stored hash. */
   comparePassword(candidate: string): Promise<boolean>;
 }
 
-const userSchema = new Schema<IUserDocument>(
+// ─── Schema ───────────────────────────────────────────────────────────────────
+
+const UserSchema = new Schema<IUser>(
   {
     name: {
       type: String,
-      required: [true, 'Name is required'],
+      required: true,
       trim: true,
-      minlength: [2, 'Name must be at least 2 characters long'],
-      maxlength: [100, 'Name must not exceed 100 characters'],
+      maxlength: 100,
     },
+
     email: {
       type: String,
-      required: [true, 'Email is required'],
+      required: true,
       unique: true,
       trim: true,
       lowercase: true,
-      match: [EMAIL_REGEX, 'A valid email address is required'],
+      match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email address'],
+      index: true,
     },
+
     password: {
       type: String,
-      required: [true, 'Password is required'],
-      minlength: [8, 'Password must be at least 8 characters long'],
+      required: true,
+      minlength: 8,
+      // Never return the password hash in query results by default
       select: false,
     },
+
     role: {
       type: String,
-      enum: ['user', 'admin'],
-      default: 'user',
+      enum: Object.values(UserRole),
+      required: true,
+      default: UserRole.USER,
+      index: true,
     },
+
+    status: {
+      type: String,
+      enum: Object.values(UserStatus),
+      required: true,
+      default: UserStatus.ACTIVE,
+      index: true,
+    },
+
+    stellarAddress: {
+      type: String,
+      trim: true,
+    },
+
+    // Audit fields set when an admin suspends/bans the account
+    suspendedAt: { type: Date },
+    suspendedReason: { type: String, trim: true, maxlength: 500 },
   },
   {
     timestamps: true,
     toJSON: {
       virtuals: true,
-      transform: (_doc, ret): Record<string, unknown> => {
-        ret.id = ret._id?.toString();
-        delete ret._id;
+      transform: (_doc, ret) => {
+        ret.id = ret._id.toString();
+        // Never leak the password hash over the wire
         delete ret.password;
         delete ret.__v;
         return ret;
@@ -69,30 +103,27 @@ const userSchema = new Schema<IUserDocument>(
   },
 );
 
-/**
- * Hash the password with bcrypt before persisting whenever it changes.
- */
-userSchema.pre<IUserDocument>('save', async function hashPassword(next) {
-  if (!this.isModified('password')) {
-    next();
-    return;
-  }
+// ─── Hooks ────────────────────────────────────────────────────────────────────
 
-  const rounds = Number(process.env.BCRYPT_ROUNDS) || DEFAULT_BCRYPT_ROUNDS;
-  const salt = await bcrypt.genSalt(rounds);
-  this.password = await bcrypt.hash(this.password, salt);
+/** Hash password before save when it has been modified. */
+UserSchema.pre<IUser>('save', async function (next) {
+  if (!this.isModified('password')) return next();
+
+  const rounds = parseInt(process.env.BCRYPT_ROUNDS ?? '10', 10);
+  this.password = await bcrypt.hash(this.password, rounds);
   next();
 });
 
-/**
- * Compare a plaintext candidate password against the stored hash.
- */
-userSchema.methods.comparePassword = async function comparePassword(
+// ─── Instance methods ──────────────────────────────────────────────────────────
+
+UserSchema.methods.comparePassword = async function (
   candidate: string,
 ): Promise<boolean> {
-  return bcrypt.compare(candidate, this.password);
+  return bcrypt.compare(candidate, this.password as string);
 };
 
-const User: Model<IUserDocument> = model<IUserDocument>('User', userSchema);
+// ─── Model ────────────────────────────────────────────────────────────────────
+
+const User = model<IUser>('User', UserSchema);
 
 export default User;
