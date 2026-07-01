@@ -7,6 +7,7 @@ import { connectDatabase } from './config/database';
 import logger from './config/logger';
 import errorHandler from './middleware/errorHandler';
 import routes from './routes';
+import env from './config/env';
 
 const app = express();
 
@@ -16,15 +17,15 @@ app.use(helmet());
 // CORS configuration
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: env.CORS_ORIGIN,
     credentials: true,
   }),
 );
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.RATE_LIMIT_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
 });
