@@ -1,187 +1,210 @@
-import { Schema, model, Document, Types } from 'mongoose';
-
-// ─── Enums ────────────────────────────────────────────────────────────────────
+import mongoose, { Document, Schema, Model, Query } from 'mongoose';
+import logger from '../config/logger';
 
 export enum DeliveryStatus {
-  PENDING = 'pending',       // Created off-chain, not yet submitted to Soroban
-  ON_CHAIN = 'on_chain',     // Transaction submitted and confirmed on Stellar
-  IN_TRANSIT = 'in_transit', // Courier has picked up the package
-  DELIVERED = 'delivered',   // Package delivered, escrow can be released
-  DISPUTED = 'disputed',     // A dispute has been raised
-  CANCELLED = 'cancelled',   // Delivery was cancelled before pick-up
+  PENDING = 'Pending',
+  ASSIGNED = 'Assigned',
+  PICKED_UP = 'Picked Up',
+  IN_TRANSIT = 'In Transit',
+  DELIVERED = 'Delivered',
+  CANCELLED = 'Cancelled',
 }
 
-// ─── Sub-document interfaces ───────────────────────────────────────────────────
+export enum DeliverySize {
+  SMALL = 'Small',
+  MEDIUM = 'Medium',
+  LARGE = 'Large',
+  EXTRA_LARGE = 'Extra Large',
+}
 
-export interface IAddress {
-  street: string;
+export interface ILocation {
+  address: string;
   city: string;
   state: string;
-  postalCode: string;
-  country: string;
+  zipCode: string;
+  lat?: number;
+  lng?: number;
+  instructions?: string;
 }
 
-export interface IPackageDetails {
-  weight: number;       // kg
-  dimensions?: {
-    length: number;     // cm
-    width: number;      // cm
-    height: number;     // cm
-  };
+export interface IPackage {
   description: string;
-  fragile: boolean;
+  weight: number;
+  size: DeliverySize;
+  itemValue?: number;
+  isFragile: boolean;
+  requiresSignature: boolean;
 }
-
-export interface IEscrow {
-  amount: number;         // Amount in XLM
-  stellarAsset: string;   // Asset code, e.g. 'XLM' or 'USDC'
-  contractId?: string;    // Soroban contract ID — populated after on-chain creation
-  txHash?: string;        // Stellar transaction hash — populated after on-chain creation
-}
-
-// ─── Main document interface ───────────────────────────────────────────────────
 
 export interface IDelivery extends Document {
-  _id: Types.ObjectId;
   trackingNumber: string;
+  customer: {
+    name: string;
+    phone: string;
+    email?: string;
+  };
+  pickup: ILocation;
+  dropoff: ILocation;
+  package: IPackage;
   status: DeliveryStatus;
-
-  sender: {
-    name: string;
-    email: string;
-    phone: string;
-    stellarAddress: string;
-    address: IAddress;
-  };
-
-  recipient: {
-    name: string;
-    email: string;
-    phone: string;
-    stellarAddress: string;
-    address: IAddress;
-  };
-
-  packageDetails: IPackageDetails;
-  escrow: IEscrow;
-
-  estimatedDeliveryDate?: Date;
-  actualDeliveryDate?: Date;
+  driver?: mongoose.Types.ObjectId;
+  estimatedDistance?: number;
+  estimatedDuration?: number;
+  deliveryFee: number;
+  escrowAmount: number;
+  stellarTransactionId?: string;
   notes?: string;
-
+  isDeleted: boolean;
+  deletedAt: Date | null;
+  deletedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
+
+  softDelete(userId?: string): Promise<IDelivery>;
+  restore(): Promise<IDelivery>;
 }
 
-// ─── Sub-document schemas ──────────────────────────────────────────────────────
+export interface IDeliveryModel extends Model<IDelivery> {
+  findAvailable(): Promise<IDelivery[]>;
+}
 
-const AddressSchema = new Schema<IAddress>(
+const locationSchema = new Schema<ILocation>(
   {
-    street: { type: String, required: true, trim: true },
+    address: { type: String, required: true, trim: true },
     city: { type: String, required: true, trim: true },
     state: { type: String, required: true, trim: true },
-    postalCode: { type: String, required: true, trim: true },
-    country: { type: String, required: true, trim: true },
+    zipCode: { type: String, required: true, trim: true },
+    lat: { type: Number },
+    lng: { type: Number },
+    instructions: { type: String, trim: true },
   },
   { _id: false },
 );
 
-const PackageDetailsSchema = new Schema<IPackageDetails>(
+const packageSchema = new Schema<IPackage>(
   {
+    description: { type: String, required: true, trim: true },
     weight: { type: Number, required: true, min: 0 },
-    dimensions: {
-      length: { type: Number, min: 0 },
-      width: { type: Number, min: 0 },
-      height: { type: Number, min: 0 },
-    },
-    description: { type: String, required: true, trim: true, maxlength: 500 },
-    fragile: { type: Boolean, required: true, default: false },
+    size: { type: String, enum: Object.values(DeliverySize), required: true },
+    itemValue: { type: Number, min: 0 },
+    isFragile: { type: Boolean, default: false },
+    requiresSignature: { type: Boolean, default: false },
   },
   { _id: false },
 );
 
-const EscrowSchema = new Schema<IEscrow>(
-  {
-    amount: { type: Number, required: true, min: 0 },
-    stellarAsset: { type: String, required: true, trim: true, default: 'XLM' },
-    contractId: { type: String, trim: true },
-    txHash: { type: String, trim: true },
-  },
-  { _id: false },
-);
-
-// ─── Main schema ───────────────────────────────────────────────────────────────
-
-const DeliverySchema = new Schema<IDelivery>(
+const deliverySchema = new Schema<IDelivery, IDeliveryModel>(
   {
     trackingNumber: {
       type: String,
       required: true,
       unique: true,
-      uppercase: true,
       trim: true,
       index: true,
     },
-
+    customer: {
+      name: { type: String, required: true, trim: true },
+      phone: { type: String, required: true, trim: true },
+      email: { type: String, trim: true, lowercase: true },
+    },
+    pickup: { type: locationSchema, required: true },
+    dropoff: { type: locationSchema, required: true },
+    package: { type: packageSchema, required: true },
     status: {
       type: String,
       enum: Object.values(DeliveryStatus),
-      required: true,
       default: DeliveryStatus.PENDING,
       index: true,
     },
-
-    sender: {
-      name: { type: String, required: true, trim: true },
-      email: {
-        type: String,
-        required: true,
-        trim: true,
-        lowercase: true,
-        match: [/^\S+@\S+\.\S+$/, 'Please provide a valid sender email address'],
-      },
-      phone: { type: String, required: true, trim: true },
-      stellarAddress: { type: String, required: true, trim: true },
-      address: { type: AddressSchema, required: true },
+    driver: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
     },
-
-    recipient: {
-      name: { type: String, required: true, trim: true },
-      email: {
-        type: String,
-        required: true,
-        trim: true,
-        lowercase: true,
-        match: [/^\S+@\S+\.\S+$/, 'Please provide a valid recipient email address'],
-      },
-      phone: { type: String, required: true, trim: true },
-      stellarAddress: { type: String, required: true, trim: true },
-      address: { type: AddressSchema, required: true },
+    estimatedDistance: { type: Number, min: 0 },
+    estimatedDuration: { type: Number, min: 0 },
+    deliveryFee: { type: Number, required: true, min: 0 },
+    escrowAmount: { type: Number, required: true, min: 0 },
+    stellarTransactionId: { type: String, trim: true },
+    notes: { type: String, trim: true },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date, default: null },
+    deletedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
     },
-
-    packageDetails: { type: PackageDetailsSchema, required: true },
-    escrow: { type: EscrowSchema, required: true },
-
-    estimatedDeliveryDate: { type: Date },
-    actualDeliveryDate: { type: Date },
-    notes: { type: String, trim: true, maxlength: 1000 },
   },
   {
-    timestamps: true,  // auto-manages createdAt / updatedAt
+    timestamps: true,
     toJSON: {
-      virtuals: true,
-      transform: (_doc, ret) => {
-        // Expose id as a plain string instead of keeping only _id
-        ret.id = ret._id.toString();
+      transform(_doc: unknown, ret: Record<string, unknown>): void {
         delete ret.__v;
-        return ret;
       },
     },
   },
 );
 
-// ─── Model ─────────────────────────────────────────────────────────────────────
+deliverySchema.pre<Query<IDelivery, IDelivery>>('find', function (next) {
+  if ((this.getOptions() as Record<string, unknown>).includeDeleted) {
+    return next();
+  }
+  this.where({ isDeleted: false });
+  next();
+});
 
-const Delivery = model<IDelivery>('Delivery', DeliverySchema);
+deliverySchema.pre<Query<IDelivery, IDelivery>>('findOne', function (next) {
+  if ((this.getOptions() as Record<string, unknown>).includeDeleted) {
+    return next();
+  }
+  this.where({ isDeleted: false });
+  next();
+});
+
+deliverySchema.pre<Query<IDelivery, IDelivery>>('findOneAndUpdate', function (next) {
+  if ((this.getOptions() as Record<string, unknown>).includeDeleted) {
+    return next();
+  }
+  this.where({ isDeleted: false });
+  next();
+});
+
+deliverySchema.pre<Query<IDelivery, IDelivery>>('countDocuments', function (next) {
+  if ((this.getOptions() as Record<string, unknown>).includeDeleted) {
+    return next();
+  }
+  this.where({ isDeleted: false });
+  next();
+});
+
+deliverySchema.methods.softDelete = async function (
+  this: IDelivery,
+  userId?: string,
+): Promise<IDelivery> {
+  this.isDeleted = true;
+  this.deletedAt = new Date();
+  if (userId) {
+    this.deletedBy = new mongoose.Types.ObjectId(userId);
+  }
+  logger.info(`Delivery ${this.trackingNumber} soft-deleted`);
+  return this.save();
+};
+
+deliverySchema.methods.restore = async function (this: IDelivery): Promise<IDelivery> {
+  this.isDeleted = false;
+  this.deletedAt = null;
+  this.deletedBy = undefined;
+  logger.info(`Delivery ${this.trackingNumber} restored`);
+  return this.save();
+};
+
+deliverySchema.statics.findAvailable = async function (): Promise<IDelivery[]> {
+  return this.find({ status: DeliveryStatus.PENDING, driver: null }).sort({ createdAt: -1 }).exec();
+};
+
+deliverySchema.index({ status: 1, isDeleted: 1 });
+deliverySchema.index({ 'customer.phone': 1 });
+deliverySchema.index({ createdAt: -1 });
+
+const Delivery = mongoose.model<IDelivery, IDeliveryModel>('Delivery', deliverySchema);
 
 export default Delivery;
