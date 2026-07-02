@@ -3,7 +3,7 @@ import app from './app';
 import logger from './config/logger';
 import { initializeSocketServer, shutdownSocketServer, TypedServer } from './sockets/connectionHandler';
 
-const PORT = process.env.PORT || 3000;
+const PORT = env.PORT;
 
 // Create an HTTP server so Socket.IO can share it with Express
 const httpServer = http.createServer(app);
