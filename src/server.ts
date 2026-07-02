@@ -1,11 +1,15 @@
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 import app from './app';
 import logger from './config/logger';
 import initSocket from './sockets';
 
-const PORT = process.env.PORT || 3000;
+const PORT = env.PORT;
 
 const server = app.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+  logger.info(`🚀 Server running on port ${PORT} in ${env.NODE_ENV} mode`);
   logger.info(`📝 Health check: http://localhost:${PORT}/health`);
 });
 
