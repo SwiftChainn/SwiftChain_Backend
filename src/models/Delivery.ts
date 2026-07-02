@@ -1,77 +1,52 @@
-import mongoose, { Document, Schema } from 'mongoose';
-
-export type DeliveryStatus =
-  | 'pending'
-  | 'assigned'
-  | 'in_transit'
-  | 'delivered'
-  | 'cancelled'
-  | 'disputed';
-
-export interface ISender {
-  userId?: string;
-  name: string;
-  contact: string;
-  address: string;
-}
-
-export interface IRecipient {
-  name: string;
-  contact: string;
-  address: string;
-}
+import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IDelivery extends Document {
-  trackingId: string;
-  sender: ISender;
-  recipient: IRecipient;
-  packageDescription: string;
-  weight?: number;
-  estimatedValue?: number;
-  driverId?: string;
-  status: DeliveryStatus;
-  notes?: string;
+  deliveryId: string;
+  driverId: string;
+  userId: string;
+  pickupCoordinates: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  dropoffCoordinates: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  status: 'pending' | 'assigned' | 'in_progress' | 'completed' | 'cancelled';
+  distance?: number;
+  estimatedDuration?: number;
+  actualDuration?: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
-const SenderSchema = new Schema<ISender>(
-  {
-    userId: { type: String },
-    name: { type: String, required: true },
-    contact: { type: String, required: true },
-    address: { type: String, required: true },
-  },
-  { _id: false },
-);
-
-const RecipientSchema = new Schema<IRecipient>(
-  {
-    name: { type: String, required: true },
-    contact: { type: String, required: true },
-    address: { type: String, required: true },
-  },
-  { _id: false },
-);
-
 const DeliverySchema = new Schema<IDelivery>(
   {
-    trackingId: { type: String, required: true, unique: true, index: true },
-    sender: { type: SenderSchema, required: true },
-    recipient: { type: RecipientSchema, required: true },
-    packageDescription: { type: String, required: true },
-    weight: { type: Number },
-    estimatedValue: { type: Number },
-    driverId: { type: String, index: true },
+    deliveryId: { type: String, required: true, unique: true },
+    driverId: { type: String, required: true },
+    userId: { type: String, required: true },
+    pickupCoordinates: {
+      lat: { type: Number, required: true },
+      lng: { type: Number, required: true },
+      address: { type: String, required: true },
+    },
+    dropoffCoordinates: {
+      lat: { type: Number, required: true },
+      lng: { type: Number, required: true },
+      address: { type: String, required: true },
+    },
     status: {
       type: String,
-      enum: ['pending', 'assigned', 'in_transit', 'delivered', 'cancelled', 'disputed'],
+      enum: ['pending', 'assigned', 'in_progress', 'completed', 'cancelled'],
       default: 'pending',
-      index: true,
     },
-    notes: { type: String },
+    distance: { type: Number },
+    estimatedDuration: { type: Number },
+    actualDuration: { type: Number },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
-export default mongoose.model<IDelivery>('Delivery', DeliverySchema);
+export const Delivery = mongoose.model<IDelivery>('Delivery', DeliverySchema);

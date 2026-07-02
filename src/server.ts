@@ -5,17 +5,11 @@ import { initializeSocketServer, shutdownSocketServer, TypedServer } from './soc
 
 const PORT = env.PORT;
 
-// Create an HTTP server so Socket.IO can share it with Express
-const httpServer = http.createServer(app);
-
-// Attach Socket.IO to the HTTP server
-const io: TypedServer = initializeSocketServer(httpServer);
-
-// Start listening
-httpServer.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+// Start the server from here
+const server = app.listen(PORT, () => {
+  logger.info(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
   logger.info(`📝 Health check: http://localhost:${PORT}/health`);
-  logger.info(`🔌 WebSocket server ready on port ${PORT}`);
+  logger.info(`📦 ETA endpoint: http://localhost:${PORT}/api/v1/deliveries/:id/eta`);
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────

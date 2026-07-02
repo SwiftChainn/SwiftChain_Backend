@@ -1,14 +1,8 @@
 import { Router } from 'express';
-import stellarRoutes from './stellar.routes';
+import deliveryRoutes from './deliveryRoutes';
 
 const router = Router();
 
-// ─── Stellar / Soroban ──────────────────────────────────────────────────────
-router.use('/stellar', stellarRoutes);
-
-// ─── Future routes ──────────────────────────────────────────────────────────
-// router.use('/auth', authRoutes);
-// router.use('/users', userRoutes);
-// router.use('/deliveries', deliveryRoutes);
+router.use('/v1/deliveries', deliveryRoutes);
 
 export default router;
