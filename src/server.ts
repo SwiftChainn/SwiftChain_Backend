@@ -1,66 +1,69 @@
-import dotenv from 'dotenv';
-
-dotenv.config();
-
+import http from 'http';
 import app from './app';
 import logger from './config/logger';
-import initSocket from './sockets';
+import { initializeSocketServer, shutdownSocketServer, TypedServer } from './sockets/connectionHandler';
 
 const PORT = env.PORT;
 
-const server = app.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT} in ${env.NODE_ENV} mode`);
+// Create an HTTP server so Socket.IO can share it with Express
+const httpServer = http.createServer(app);
+
+// Attach Socket.IO to the HTTP server
+const io: TypedServer = initializeSocketServer(httpServer);
+
+// Start listening
+httpServer.listen(PORT, () => {
+  logger.info(`🚀 Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
   logger.info(`📝 Health check: http://localhost:${PORT}/health`);
+  logger.info(`🔌 WebSocket server ready on port ${PORT}`);
 });
 
-// Initialize Socket.io
-const io = initSocket(server);
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
 
-// Graceful shutdown
-const gracefulShutdown = (): void => {
+const gracefulShutdown = async (): Promise<void> => {
   logger.info('Received shutdown signal, closing gracefully...');
 
-  // Close HTTP server
-  server.close(() => {
-    logger.info('HTTP server closed');
+  try {
+    // 1. Stop accepting new WebSocket connections and close existing ones
+    await shutdownSocketServer(io);
 
-    // Close socket.io if present
-    try {
-      if (io && typeof io.close === 'function') {
-        // close all sockets
-        // @ts-ignore
-        io.close(() => logger.info('Socket.io server closed'));
-      }
-    } catch (err) {
-      logger.warn('Error while closing Socket.io', err);
-    }
+    // 2. Stop accepting new HTTP requests
+    httpServer.close(async () => {
+      logger.info('HTTP server closed');
 
-    import('mongoose').then(({ default: mongoose }) => {
-      mongoose.connection.close(false).then(() => {
+      try {
+        const { default: mongoose } = await import('mongoose');
+        await mongoose.connection.close(false);
         logger.info('MongoDB connection closed');
-        process.exit(0);
-      });
+      } catch (dbErr) {
+        logger.error('Error closing MongoDB connection:', dbErr);
+      }
+
+      process.exit(0);
     });
-  });
+  } catch (err) {
+    logger.error('Error during graceful shutdown:', err);
+    process.exit(1);
+  }
 
   // Force close after 10 seconds
   setTimeout(() => {
     logger.error('Could not close connections in time, forcefully shutting down');
     process.exit(1);
-  }, 10000);
+  }, 10_000);
 };
 
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', () => void gracefulShutdown());
+process.on('SIGINT', () => void gracefulShutdown());
 
 process.on('unhandledRejection', (error: Error) => {
   logger.error('Unhandled Rejection:', error);
-  gracefulShutdown();
+  void gracefulShutdown();
 });
 
 process.on('uncaughtException', (error: Error) => {
   logger.error('Uncaught Exception:', error);
-  gracefulShutdown();
+  void gracefulShutdown();
 });
 
-export default server;
+export default httpServer;
