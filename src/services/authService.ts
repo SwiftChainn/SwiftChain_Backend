@@ -1,38 +1,26 @@
-import User, { type IUser } from '../models/User';
-import ApiError from '../utils/ApiError';
-import type { RegisterInput } from '../validators/authValidator';
+import jwt from 'jsonwebtoken';
+import logger from '../config/logger';
+import User, { IUser } from '../models/User';
 
-/**
- * Public-facing representation of a user, with the password hash removed.
- */
-export type SafeUser = Omit<IUser, 'password'> & { id: string };
+const JWT_SECRET = process.env.JWT_SECRET || 'change_me_in_prod';
 
-/**
- * Register a new user.
- *
- * Persists the user (the password is hashed by the model's pre-save hook)
- * and returns a sanitized representation that never exposes the hash.
- *
- * @throws {ApiError} 409 if a user with the same email already exists.
- */
-export const registerUser = async (input: RegisterInput): Promise<SafeUser> => {
-  const existingUser = await User.findOne({ email: input.email }).lean().exec();
-  if (existingUser) {
-    throw ApiError.conflict('A user with this email already exists');
-  }
-
-  try {
-    const user = await User.create(input);
-    // `toJSON` strips the password hash and internal fields.
-    return user.toJSON() as unknown as SafeUser;
-  } catch (error) {
-    // Guard against a race condition where the unique index rejects a
-    // concurrent insert after the existence check above.
-    if (error instanceof Error && 'code' in error && error.code === 11000) {
-      throw ApiError.conflict('A user with this email already exists');
+class AuthService {
+  public verifyToken(token: string): { userId: string } {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { sub?: string } | null;
+      if (!decoded) throw new Error('Invalid token');
+      const userId = (decoded as any).sub || (decoded as any).id || (decoded as any)._id;
+      if (!userId) throw new Error('Token missing subject');
+      return { userId };
+    } catch (error) {
+      logger.warn('JWT verification failed', error);
+      throw error;
     }
-    throw error;
   }
-};
 
-export default { registerUser };
+  public async getUserById(id: string): Promise<IUser | null> {
+    return User.findById(id).lean().exec() as unknown as IUser | null;
+  }
+}
+
+export default new AuthService();
