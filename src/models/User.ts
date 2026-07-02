@@ -43,7 +43,7 @@ const userSchema = new Schema<IUser>(
   {
     timestamps: true,
     toJSON: {
-      transform(_doc, ret) {
+      transform(_doc, ret): any {
         ret.id = ret._id;
         delete ret._id;
         delete ret.__v;
@@ -71,9 +71,7 @@ userSchema.pre('save', async function (next) {
 });
 
 // Instance method to compare passwords
-userSchema.methods.comparePassword = async function (
-  candidatePassword: string,
-): Promise<boolean> {
+userSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
 

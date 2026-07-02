@@ -45,7 +45,7 @@ afterEach(async () => {
  * This goes through the Mongoose model (including the pre-save hash hook)
  * so the password is properly hashed.
  */
-const createTestUser = async (overrides = {}) => {
+const createTestUser = async (overrides = {}): Promise<any> => {
   const defaultUser = {
     email: 'testuser@swiftchain.com',
     password: 'SecurePass123!',

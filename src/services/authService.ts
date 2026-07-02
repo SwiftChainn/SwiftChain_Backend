@@ -67,11 +67,7 @@ class AuthService {
     const secret = process.env.JWT_SECRET;
 
     if (!secret) {
-      throw new AppError(
-        'JWT secret is not configured',
-        StatusCodes.INTERNAL_SERVER_ERROR,
-        false,
-      );
+      throw new AppError('JWT secret is not configured', StatusCodes.INTERNAL_SERVER_ERROR, false);
     }
 
     const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
