@@ -2,7 +2,6 @@ import logger from '../config/logger';
 import { getRedisClient } from '../config/redis';
 import { buildEtaCacheKey } from '../utils/etaCacheKey';
 import { Coordinates, ETAResponse, TravelMode } from '../types/routing.types';
-import env from '../config/env';
 
 export interface EtaCacheLookup {
   pickup: Coordinates;
@@ -84,11 +83,13 @@ export class EtaCacheService {
   }
 
   private readTtlSeconds(): number {
-    return env.ETA_CACHE_TTL_SECONDS;
+    const parsed = parseInt(process.env.ETA_CACHE_TTL_SECONDS ?? '600', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 600;
   }
 
   private readGeohashPrecision(): number {
-    return env.ETA_GEOHASH_PRECISION;
+    const parsed = parseInt(process.env.ETA_GEOHASH_PRECISION ?? '7', 10);
+    return Number.isFinite(parsed) && parsed >= 1 && parsed <= 12 ? parsed : 7;
   }
 }
 

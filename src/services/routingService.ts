@@ -1,5 +1,4 @@
 import axios from 'axios';
-import env from '../config/env';
 
 export interface Coordinates {
   lat: number;
@@ -32,7 +31,7 @@ class RoutingService {
   private readonly baseUrl: string;
 
   constructor() {
-    this.apiKey = env.GOOGLE_MAPS_API_KEY;
+    this.apiKey = process.env.GOOGLE_MAPS_API_KEY || '';
     this.baseUrl = 'https://maps.googleapis.com/maps/api/directions/json';
 
     if (!this.apiKey) {

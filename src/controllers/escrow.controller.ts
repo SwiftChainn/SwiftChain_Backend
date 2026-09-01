@@ -3,7 +3,6 @@ import httpStatus from 'http-status-codes';
 import { escrowService } from '../services/escrow.service';
 import { syncEscrowFundedEvents } from '../indexer/escrowHandlers';
 import { AppError } from '../utils/AppError';
-import { sendSuccess } from '../utils/responseWrapper';
 import logger from '../config/logger';
 
 /**
@@ -18,7 +17,10 @@ export class EscrowController {
   async getByDelivery(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const escrow = await escrowService.getByDeliveryId(req.params.deliveryId);
-      sendSuccess(res, escrow, 'Escrow retrieved successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: escrow,
+      });
     } catch (error) {
       next(error);
     }
@@ -27,7 +29,10 @@ export class EscrowController {
   async getByContract(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const escrow = await escrowService.getByContractId(req.params.contractId);
-      sendSuccess(res, escrow, 'Escrow retrieved successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: escrow,
+      });
     } catch (error) {
       next(error);
     }
@@ -43,7 +48,10 @@ export class EscrowController {
       const contractId: string | undefined = req.body.contractId;
       const summary = await syncEscrowFundedEvents(startLedger, contractId);
 
-      sendSuccess(res, summary, 'Escrow events synced successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: summary,
+      });
     } catch (error) {
       next(error);
     }
@@ -67,6 +75,7 @@ export class EscrowController {
     try {
       const { escrowId, transactionHash, ledger } = req.body;
 
+      // Validate required fields
       if (!escrowId || typeof escrowId !== 'string' || escrowId.trim().length === 0) {
         throw new AppError('escrowId is required', httpStatus.BAD_REQUEST);
       }
@@ -79,10 +88,12 @@ export class EscrowController {
         throw new AppError('transactionHash is required', httpStatus.BAD_REQUEST);
       }
 
+      // Validate ledger if provided
       if (ledger !== undefined && (!Number.isInteger(ledger) || ledger < 0)) {
         throw new AppError('ledger must be a non-negative integer', httpStatus.BAD_REQUEST);
       }
 
+      // Extract user ID from authenticated request (if available)
       const user = (req as Request & { user?: { _id: string; id: string } }).user;
       const releasedBy = user?._id || user?.id;
 
@@ -97,7 +108,11 @@ export class EscrowController {
         releasedBy,
       });
 
-      sendSuccess(res, { escrow }, 'Escrow released successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        message: 'Escrow released successfully',
+        data: { escrow },
+      });
     } catch (error) {
       next(error);
     }

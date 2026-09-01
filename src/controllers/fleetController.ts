@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import {
+  createFleet as createFleetService,
   inviteDriver as inviteDriverService,
   respondToInvitation as respondToInvitationService,
   getFleetMetrics as getFleetMetricsService,
@@ -10,7 +11,6 @@ import AppError from '../utils/AppError';
 import mongoose from 'mongoose';
 import Fleet from '../models/Fleet';
 import User from '../models/User';
-import { sendSuccess } from '../utils/responseWrapper';
 
 // ─── Request body types ────────────────────────────────────────────────────────
 
@@ -46,6 +46,14 @@ interface RespondToInvitationBody {
 
 /**
  * POST /api/v1/fleets
+ *
+ * Creates a new fleet owned by the authenticated enterprise user.
+ * Protected by `authenticate` + `requireRole(UserRole.ENTERPRISE)`.
+ *
+ * Body:
+ *   - name {string} Required — fleet display name.
+ *   - treasuryAddress {string} Required — Stellar treasury address.
+ *   - businessMetadata {object} Required — company information.
  */
 export const createFleet = async (
   req: Request<unknown, unknown, CreateFleetBody>,
@@ -58,8 +66,9 @@ export const createFleet = async (
       throw new AppError('Authentication required.', StatusCodes.UNAUTHORIZED);
     }
 
+    // Validate required fields
     const { name, treasuryAddress, businessMetadata } = req.body;
-
+    
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
       throw new AppError(
         'A fleet name of at least 2 characters is required.',
@@ -68,18 +77,29 @@ export const createFleet = async (
     }
 
     if (!treasuryAddress || typeof treasuryAddress !== 'string') {
-      throw new AppError('Treasury address is required.', StatusCodes.BAD_REQUEST);
+      throw new AppError(
+        'Treasury address is required.',
+        StatusCodes.BAD_REQUEST,
+      );
     }
 
     if (!businessMetadata || typeof businessMetadata !== 'object') {
-      throw new AppError('Business metadata is required.', StatusCodes.BAD_REQUEST);
+      throw new AppError(
+        'Business metadata is required.',
+        StatusCodes.BAD_REQUEST,
+      );
     }
 
+    // Create fleet with all fields
     const fleet = await Fleet.create({
       name: name.trim(),
-      treasuryAddress: (treasuryAddress as string).trim(),
+      treasuryAddress: treasuryAddress.trim(),
       ownerId: owner._id,
-      members: [{ userId: owner._id, role: 'admin', joinedAt: new Date() }],
+      members: [{
+        userId: owner._id,
+        role: 'admin',
+        joinedAt: new Date()
+      }],
       businessMetadata: {
         companyName: businessMetadata.companyName,
         industry: businessMetadata.industry || '',
@@ -93,7 +113,11 @@ export const createFleet = async (
       isActive: true,
     });
 
-    sendSuccess(res, { fleet }, 'Fleet created successfully.', StatusCodes.CREATED);
+    res.status(StatusCodes.CREATED).json({
+      status: 'success',
+      message: 'Fleet created successfully.',
+      data: { fleet },
+    });
   } catch (error) {
     next(error);
   }
@@ -101,6 +125,13 @@ export const createFleet = async (
 
 /**
  * POST /api/v1/fleets/:id/invite
+ *
+ * Invites a driver to join the fleet. Protected by `authenticate` +
+ * `requireRole(UserRole.ENTERPRISE)`; ownership is additionally enforced in
+ * the service layer.
+ *
+ * Body:
+ *   - driverId {string} Required — MongoDB ObjectId of the invited driver.
  */
 export const inviteDriver = async (
   req: Request<{ id: string }, unknown, InviteDriverBody>,
@@ -126,7 +157,11 @@ export const inviteDriver = async (
       invitedBy: owner._id.toString(),
     });
 
-    sendSuccess(res, { invitation }, 'Invitation sent successfully.', StatusCodes.CREATED);
+    res.status(StatusCodes.CREATED).json({
+      status: 'success',
+      message: 'Invitation sent successfully.',
+      data: { invitation },
+    });
   } catch (error) {
     next(error);
   }
@@ -134,6 +169,12 @@ export const inviteDriver = async (
 
 /**
  * PATCH /api/v1/fleets/invitations/:invitationId
+ *
+ * A driver accepts or declines a pending fleet invitation. Protected by
+ * `authenticate` + `requireRole(UserRole.DRIVER)`.
+ *
+ * Body:
+ *   - accept {boolean} Required — true to accept, false to decline.
  */
 export const respondToInvitation = async (
   req: Request<{ invitationId: string }, unknown, RespondToInvitationBody>,
@@ -159,12 +200,11 @@ export const respondToInvitation = async (
       accept,
     });
 
-    sendSuccess(
-      res,
-      { invitation },
-      `Invitation ${invitation.status} successfully.`,
-      StatusCodes.OK,
-    );
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: `Invitation ${invitation.status} successfully.`,
+      data: { invitation },
+    });
   } catch (error) {
     next(error);
   }
@@ -172,6 +212,10 @@ export const respondToInvitation = async (
 
 /**
  * GET /api/v1/fleets/:id/metrics
+ *
+ * Returns aggregated delivery and revenue statistics for a fleet. Protected
+ * by `authenticate` + `requireRole(UserRole.ENTERPRISE)`; ownership is
+ * additionally enforced in the service layer.
  */
 export const getFleetMetrics = async (
   req: Request<{ id: string }>,
@@ -187,19 +231,25 @@ export const getFleetMetrics = async (
     const { id: fleetId } = req.params;
     const metrics = await getFleetMetricsService(fleetId, owner._id.toString());
 
-    sendSuccess(res, { metrics }, 'Fleet metrics retrieved successfully', StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      data: { metrics },
+    });
   } catch (error) {
     next(error);
   }
 };
 
+// ─── New CRUD Methods ──────────────────────────────────────────────────────────
+
 /**
  * GET /api/v1/fleets
+ * Get all fleets with pagination
  */
 export const getAllFleets = async (
   req: Request,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> => {
   try {
     const user = (req as Request & { user?: IUser }).user;
@@ -220,9 +270,9 @@ export const getAllFleets = async (
 
     const total = await Fleet.countDocuments({ isActive: true });
 
-    sendSuccess(
-      res,
-      {
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      data: {
         fleets,
         pagination: {
           page,
@@ -231,9 +281,7 @@ export const getAllFleets = async (
           pages: Math.ceil(total / limit),
         },
       },
-      'Fleets retrieved successfully',
-      StatusCodes.OK,
-    );
+    });
   } catch (error) {
     next(error);
   }
@@ -241,11 +289,12 @@ export const getAllFleets = async (
 
 /**
  * GET /api/v1/fleets/:id
+ * Get a single fleet by ID
  */
 export const getFleetById = async (
   req: Request<{ id: string }>,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> => {
   try {
     const user = (req as Request & { user?: IUser }).user;
@@ -267,7 +316,10 @@ export const getFleetById = async (
       throw new AppError('Fleet not found.', StatusCodes.NOT_FOUND);
     }
 
-    sendSuccess(res, { fleet }, 'Fleet retrieved successfully', StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      data: { fleet },
+    });
   } catch (error) {
     next(error);
   }
@@ -275,11 +327,12 @@ export const getFleetById = async (
 
 /**
  * PUT /api/v1/fleets/:id
+ * Update a fleet
  */
 export const updateFleet = async (
   req: Request<{ id: string }>,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> => {
   try {
     const user = (req as Request & { user?: IUser }).user;
@@ -311,12 +364,16 @@ export const updateFleet = async (
     const updatedFleet = await Fleet.findByIdAndUpdate(
       id,
       { ...updateData, updatedAt: new Date() },
-      { new: true, runValidators: true },
+      { new: true, runValidators: true }
     )
-      .populate('ownerId', 'name email')
-      .populate('members.userId', 'name email role');
+    .populate('ownerId', 'name email')
+    .populate('members.userId', 'name email role');
 
-    sendSuccess(res, { fleet: updatedFleet }, 'Fleet updated successfully.', StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: 'Fleet updated successfully.',
+      data: { fleet: updatedFleet },
+    });
   } catch (error) {
     next(error);
   }
@@ -324,11 +381,12 @@ export const updateFleet = async (
 
 /**
  * DELETE /api/v1/fleets/:id
+ * Soft delete a fleet
  */
 export const deleteFleet = async (
   req: Request<{ id: string }>,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> => {
   try {
     const user = (req as Request & { user?: IUser }).user;
@@ -354,7 +412,10 @@ export const deleteFleet = async (
     fleet.isActive = false;
     await fleet.save();
 
-    sendSuccess(res, null, 'Fleet deleted successfully.', StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: 'Fleet deleted successfully.',
+    });
   } catch (error) {
     next(error);
   }
@@ -362,11 +423,12 @@ export const deleteFleet = async (
 
 /**
  * POST /api/v1/fleets/:id/members
+ * Add a member to the fleet
  */
 export const addMember = async (
   req: Request<{ id: string }, unknown, { userId: string; role?: string }>,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> => {
   try {
     const user = (req as Request & { user?: IUser }).user;
@@ -399,7 +461,9 @@ export const addMember = async (
       throw new AppError('Only the fleet owner can add members.', StatusCodes.FORBIDDEN);
     }
 
-    const isMember = fleet.members.some((m) => m.userId.toString() === userId);
+    const isMember = fleet.members.some(
+      (m) => m.userId.toString() === userId
+    );
     if (isMember) {
       throw new AppError('User is already a member of this fleet.', StatusCodes.CONFLICT);
     }
@@ -414,7 +478,11 @@ export const addMember = async (
     await fleet.populate('ownerId', 'name email');
     await fleet.populate('members.userId', 'name email role');
 
-    sendSuccess(res, { fleet }, 'Member added successfully.', StatusCodes.CREATED);
+    res.status(StatusCodes.CREATED).json({
+      status: 'success',
+      message: 'Member added successfully.',
+      data: { fleet },
+    });
   } catch (error) {
     next(error);
   }
@@ -422,11 +490,12 @@ export const addMember = async (
 
 /**
  * DELETE /api/v1/fleets/:id/members/:userId
+ * Remove a member from the fleet
  */
 export const removeMember = async (
   req: Request<{ id: string; userId: string }>,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> => {
   try {
     const user = (req as Request & { user?: IUser }).user;
@@ -453,7 +522,9 @@ export const removeMember = async (
       throw new AppError('Cannot remove the fleet owner.', StatusCodes.BAD_REQUEST);
     }
 
-    const memberIndex = fleet.members.findIndex((m) => m.userId.toString() === userId);
+    const memberIndex = fleet.members.findIndex(
+      (m) => m.userId.toString() === userId
+    );
 
     if (memberIndex === -1) {
       throw new AppError('Member not found in this fleet.', StatusCodes.NOT_FOUND);
@@ -462,7 +533,10 @@ export const removeMember = async (
     fleet.members.splice(memberIndex, 1);
     await fleet.save();
 
-    sendSuccess(res, null, 'Member removed successfully.', StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: 'Member removed successfully.',
+    });
   } catch (error) {
     next(error);
   }

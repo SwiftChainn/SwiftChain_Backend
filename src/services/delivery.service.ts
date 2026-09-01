@@ -4,10 +4,6 @@ import Delivery, { IDelivery, DeliveryStatus, ILocation, IPackage } from '../mod
 import Escrow, { EscrowLockStatus } from '../models/Escrow';
 import { AppError } from '../utils/AppError';
 import logger from '../config/logger';
-import { deliveryRepository } from '../repositories/DeliveryRepository';
-import { notificationService } from './notificationService';
-import { webhookService } from './webhookService';
-import { proofOfDeliveryService } from './proofOfDeliveryService';
 
 export interface CreateDeliveryInput {
   trackingNumber: string;
@@ -55,26 +51,6 @@ export interface PaginatedResult<T> {
   limit: number;
   totalPages: number;
 }
-
-/**
- * Legal delivery status transitions.
- *
- * Encoded as a map rather than checked inline so the state machine is
- * inspectable in one place and covered directly by tests. Terminal states map
- * to an empty list: nothing follows a completed or cancelled delivery.
- */
-const ALLOWED_TRANSITIONS: Record<DeliveryStatus, readonly DeliveryStatus[]> = {
-  [DeliveryStatus.PENDING]: [
-    DeliveryStatus.FUNDED,
-    DeliveryStatus.ASSIGNED,
-    DeliveryStatus.CANCELLED,
-  ],
-  [DeliveryStatus.FUNDED]: [DeliveryStatus.ASSIGNED, DeliveryStatus.CANCELLED],
-  [DeliveryStatus.ASSIGNED]: [DeliveryStatus.IN_PROGRESS, DeliveryStatus.CANCELLED],
-  [DeliveryStatus.IN_PROGRESS]: [DeliveryStatus.COMPLETED, DeliveryStatus.CANCELLED],
-  [DeliveryStatus.COMPLETED]: [],
-  [DeliveryStatus.CANCELLED]: [],
-};
 
 export class DeliveryService {
   async create(input: CreateDeliveryInput): Promise<IDelivery> {
@@ -211,79 +187,6 @@ export class DeliveryService {
       limit,
       totalPages: Math.ceil(total / limit),
     };
-  }
-
-  /**
-   * Advance a delivery to a new status and notify the parties involved.
-   *
-   * The transition is applied with a conditional update that asserts the
-   * current status, so two concurrent requests cannot both advance the same
-   * delivery — the loser matches no document and is rejected with a 409.
-   *
-   * Push notifications are dispatched after the write commits, and never
-   * affect the outcome: a delivery that has moved to `completed` stays
-   * completed even if the push provider is unreachable.
-   *
-   * @throws {AppError} 400 — invalid delivery id, or an illegal transition.
-   * @throws {AppError} 404 — delivery not found.
-   * @throws {AppError} 409 — the delivery changed status concurrently.
-   */
-  async updateStatus(id: string, nextStatus: DeliveryStatus): Promise<IDelivery> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new AppError('Invalid delivery ID', httpStatus.BAD_REQUEST);
-    }
-
-    const current = await deliveryRepository.findById(id);
-    if (!current) {
-      throw new AppError('Delivery not found', httpStatus.NOT_FOUND);
-    }
-
-    if (current.status === nextStatus) {
-      throw new AppError(
-        `Delivery is already in status '${nextStatus}'.`,
-        httpStatus.CONFLICT,
-      );
-    }
-
-    const permitted = ALLOWED_TRANSITIONS[current.status] ?? [];
-    if (!permitted.includes(nextStatus)) {
-      throw new AppError(
-        `Cannot transition a delivery from '${current.status}' to '${nextStatus}'.` +
-          (permitted.length > 0
-            ? ` Allowed next states: ${permitted.join(', ')}.`
-            : ' This is a terminal state.'),
-        httpStatus.BAD_REQUEST,
-      );
-    }
-
-    if (nextStatus === DeliveryStatus.COMPLETED) {
-      // Proof of delivery must be on record before a delivery can be marked
-      // completed — this is what ultimately unblocks its escrow release.
-      await proofOfDeliveryService.assertProofOfDeliveryExists(id);
-    }
-
-    const updated = await deliveryRepository.transitionStatus(id, current.status, nextStatus);
-
-    if (!updated) {
-      // The conditional update matched nothing, so the status changed between
-      // the read above and the write — a concurrent transition won.
-      throw new AppError(
-        'Delivery status changed concurrently. Retry with the current state.',
-        httpStatus.CONFLICT,
-      );
-    }
-
-    logger.info(
-      `[DeliveryService] Status transition — delivery=${id} ` +
-        `${current.status} -> ${nextStatus}`,
-    );
-
-    // Fire-and-forget by design: notification/webhook failures are recorded
-    // inside their own services and must not roll back a committed transition.
-    await notificationService.notifyDeliveryTransition(updated, nextStatus);
-    await webhookService.dispatchDeliveryEvent(updated, nextStatus);
-
-    return updated;
   }
 
   /**

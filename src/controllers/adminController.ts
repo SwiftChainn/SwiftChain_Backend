@@ -6,7 +6,6 @@ import {
 } from '../services/adminService';
 import type { IUser } from '../interfaces/IUser';
 import AppError from '../utils/AppError';
-import { sendSuccess } from '../utils/responseWrapper';
 
 // ─── Request body type ─────────────────────────────────────────────────────────
 
@@ -45,6 +44,7 @@ export const suspendUser = async (
     const { id: targetUserId } = req.params;
     const { reason, ban } = req.body;
 
+    // Input validation
     if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
       throw new AppError('A reason is required to suspend or ban a user.', StatusCodes.BAD_REQUEST);
     }
@@ -60,7 +60,11 @@ export const suspendUser = async (
       ban: ban === true,
     });
 
-    sendSuccess(res, { user }, `User has been ${action} successfully.`, StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: `User has been ${action} successfully.`,
+      data: { user },
+    });
   } catch (error) {
     next(error);
   }
@@ -70,7 +74,7 @@ export const suspendUser = async (
  * GET /api/v1/admin/disputes
  *
  * Retrieves a paginated list of disputes for the admin dashboard.
- * Supports pagination (`page`, `limit`) and filtering by `status`.
+ * Supports pagination (`page`, `limit`) and filtering by `status` (open, under_review, resolved, rejected, active, all).
  * Protected by `authenticate` + `requireRole(UserRole.ADMIN)`.
  */
 export const getDisputes = async (
@@ -110,13 +114,13 @@ export const getDisputes = async (
       status: status !== undefined ? String(status) : undefined,
     });
 
-    sendSuccess(
-      res,
-      { disputes: result.disputes, pagination: result.pagination },
-      'Disputes retrieved successfully',
-      StatusCodes.OK,
-    );
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      data: result.disputes,
+      pagination: result.pagination,
+    });
   } catch (error) {
     next(error);
   }
 };
+

@@ -4,7 +4,6 @@ import Escrow, { EscrowLockStatus, IEscrow } from '../models/Escrow';
 import { sorobanService } from '../blockchain/soroban.service';
 import AppError from '../utils/AppError';
 import logger from '../config/logger';
-import { nowUTC } from '../utils/dateUtils';
 
 // ─── DTOs ──────────────────────────────────────────────────────────────────────
 
@@ -50,7 +49,7 @@ export interface ResolveEscrowInput {
  * or expiresAt field in the current Escrow model.
  */
 export const scanForExpiredEscrows = async (): Promise<ScanExpiredEscrowsResult> => {
-  const now = nowUTC();
+  const now = new Date();
 
   // Note: Commented out until EscrowStatus.EXPIRED and expiresAt field are added to model
   // const expiredCandidates = await Escrow.find({

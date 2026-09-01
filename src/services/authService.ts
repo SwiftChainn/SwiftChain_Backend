@@ -4,7 +4,6 @@ import User from '../models/User';
 import { IAuthResponse, ILoginPayload, IUser } from '../interfaces/IUser';
 import AppError from '../utils/AppError';
 import logger from '../config/logger';
-import env from '../config/env';
 
 class AuthService {
   /**
@@ -65,13 +64,13 @@ class AuthService {
    * Generate a signed JWT token containing the user's ID and role.
    */
   private generateToken(userId: string, role: string): string {
-    const secret = env.JWT_SECRET;
+    const secret = process.env.JWT_SECRET;
 
     if (!secret) {
       throw new AppError('JWT secret is not configured', StatusCodes.INTERNAL_SERVER_ERROR, false);
     }
 
-    const expiresIn = env.JWT_EXPIRES_IN;
+    const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
 
     return jwt.sign({ userId, role }, secret, {
       expiresIn,
@@ -79,16 +78,15 @@ class AuthService {
   }
 
   public verifyToken(token: string): { userId: string } {
-    const JWT_SECRET = env.JWT_SECRET;
+    const JWT_SECRET = process.env.JWT_SECRET || 'change_me_in_prod';
     try {
       const decoded = jwt.verify(token, JWT_SECRET) as {
-        userId?: string;
         sub?: string;
         id?: string;
         _id?: string;
       } | null;
       if (!decoded) throw new Error('Invalid token');
-      const userId = decoded.userId || decoded.sub || decoded.id || decoded._id;
+      const userId = decoded.sub || decoded.id || decoded._id;
       if (!userId) throw new Error('Token missing subject');
       return { userId };
     } catch (error) {

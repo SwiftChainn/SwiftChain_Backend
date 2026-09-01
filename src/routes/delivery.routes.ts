@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { deliveryController } from '../controllers/delivery.controller';
 import { validateRequest } from '../middlewares/validateRequest';
-import { requireIdempotencyKey } from '../middlewares/idempotency';
 import {
   createDeliverySchema,
   updateDeliverySchema,
@@ -10,7 +9,6 @@ import {
 import authenticate from '../middleware/authenticate';
 import requireRole from '../middleware/requireRole';
 import { UserRole } from '../interfaces/IUser';
-import { requireIdempotencyKey } from '../middlewares/idempotency';
 
 const router = Router();
 

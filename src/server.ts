@@ -9,15 +9,12 @@ import {
   TypedServer,
 } from './sockets/connectionHandler';
 import { startEscrowMonitorJob, stopEscrowMonitorJob } from './jobs/escrowMonitor';
-import { startWebhookRetryJob, stopWebhookRetryJob } from './jobs/webhookRetryJob';
-import { startAutoAssignmentJob, stopAutoAssignmentJob } from './jobs/autoAssignmentJob';
 import { startEventPoller, stopEventPoller } from './services/eventPoller';
 import { initializeRedis, disconnectRedis } from './config/redis';
-import env from './config/env';
 
 dotenv.config();
 
-const PORT = env.PORT;
+const PORT = process.env.PORT || 8000;
 
 const httpServer = http.createServer(app);
 const io: TypedServer = initializeSocketServer(httpServer);
@@ -31,7 +28,7 @@ const initializeServices = async (): Promise<void> => {
     logger.error('❌ Failed to connect to Redis:', error);
     logger.warn('⚠️ Distributed locking will not be available');
     // Continue without Redis in non-production environments
-    if (env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production') {
       process.exit(1);
     }
   }
@@ -39,7 +36,7 @@ const initializeServices = async (): Promise<void> => {
 
 httpServer.listen(PORT, () => {
   logger.info(
-    `🚀 Server running on port ${PORT} in ${env.NODE_ENV} mode`
+    `🚀 Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`
   );
   logger.info(`📝 Health check: http://localhost:${PORT}/health`);
   logger.info(`📦 ETA endpoint: http://localhost:${PORT}/api/v1/deliveries/:id/eta`);
@@ -52,10 +49,8 @@ httpServer.listen(PORT, () => {
   startIndexerLagMonitor();
 });
 
-if (env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test') {
   startEscrowMonitorJob();
-  startWebhookRetryJob();
-  startAutoAssignmentJob();
   startEventPoller();
 }
 
@@ -63,9 +58,7 @@ const gracefulShutdown = (): void => {
   logger.info('Shutting down gracefully...');
   stopEventPoller();
   stopEscrowMonitorJob();
-  stopWebhookRetryJob();
-  stopAutoAssignmentJob();
-
+  
   // Disconnect Redis
   disconnectRedis()
     .catch((error) => logger.error('Error disconnecting Redis:', error));

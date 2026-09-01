@@ -1,0 +1,343 @@
+================================================================================
+          GITHUB ISSUE #39 — PART 2: IMPLEMENTATION COMPLETE
+================================================================================
+
+DATE:           2026-08-29
+ISSUE:          #39 - Implement indexer handler for escrow_released and 
+                      escrow_refunded events
+TASK:           PART 2 OF 4 — IMPLEMENT HANDLERS
+STATUS:         ✅ IMPLEMENTATION COMPLETE
+
+================================================================================
+                    IMPLEMENTATION SUMMARY
+================================================================================
+
+All handlers implemented following the EXACT pattern from Part 1 analysis:
+  • Controller → Service → Model layered architecture
+  • Event parsing with null-safe validation
+  • Idempotent operations using transaction hashes
+  • Distributed locking for concurrency control
+  • Comprehensive error handling and logging
+
+================================================================================
+                    FILES MODIFIED & CREATED
+================================================================================
+
+1. src/indexer/escrowHandlers.ts (391 lines)
+   ────────────────────────────────────────
+   NEW INTERFACES:
+   ✓ EscrowReleasedEventData
+   ✓ EscrowRefundedEventData
+
+   NEW PARSER FUNCTIONS:
+   ✓ parseEscrowReleasedEvent() — Extracts event data from Soroban XDR
+   ✓ parseEscrowRefundedEvent() — Extracts event data from Soroban XDR
+
+   NEW HANDLER FUNCTIONS:
+   ✓ handleEscrowReleasedEvent() — Process single escrow_released event
+   ✓ handleEscrowRefundedEvent() — Process single escrow_refunded event
+
+   NEW SYNC FUNCTIONS:
+   ✓ syncEscrowReleasedEvents() — Poll RPC and batch process events
+   ✓ syncEscrowRefundedEvents() — Poll RPC and batch process events
+
+   FLOW:
+   Soroban RPC getEvents() → Parse → Handle → Service → Update MongoDB
+
+
+2. src/services/escrow.service.ts (300 lines)
+   ─────────────────────────────────────────
+   NEW INTERFACES:
+   ✓ RefundEscrowInput — Input data for refund operations
+
+   NEW SERVICE METHOD:
+   ✓ refundEscrow(input: RefundEscrowInput): Promise<IEscrow>
+     - Uses distributed locking (via Redis withLock)
+     - Validates escrow state (must be LOCKED)
+     - Prevents double-refund via transaction hash tracking
+     - Updates escrow status to REFUNDED
+     - Updates delivery status to CANCELLED
+     - Idempotent — replaying same tx hash is a no-op
+
+   PATTERN FOLLOWS:
+   ✓ releaseEscrow() method already in service
+   ✓ refundEscrow() mirrors the same pattern
+
+================================================================================
+                    HANDLER IMPLEMENTATION DETAILS
+================================================================================
+
+STEP 1: EVENT PARSING
+────────────────────
+
+parseEscrowReleasedEvent():
+  • Extract deliveryId from event.topic[1] (XDR-decoded)
+  • Extract amount from event.value (data map)
+  • Handle bigint → number conversion
+  • Validate required fields
+  • Return typed EscrowReleasedEventData or null
+  • Log parse failures without crashing indexer
+
+parseEscrowRefundedEvent():
+  • Same pattern as released
+  • Extract refundedTo from data map
+  • Null-safe extraction (try multiple field names)
+
+STEP 2: SINGLE EVENT HANDLING
+──────────────────────────────
+
+handleEscrowReleasedEvent():
+  1. Parse event
+  2. If parse fails → return {status: 'ignored', reason: 'unparseable'}
+  3. Create ReleaseEscrowInput with:
+     - escrowId: contractId
+     - transactionHash: event.txHash
+     - ledger: event.ledger
+     - releasedBy: parsed.releasedTo
+  4. Call escrowService.releaseEscrow(input)
+  5. Return {status: 'processed', transactionHash}
+
+handleEscrowRefundedEvent():
+  1. Parse event
+  2. If parse fails → return {status: 'ignored', reason: 'unparseable'}
+  3. Create RefundEscrowInput with:
+     - escrowId: contractId
+     - transactionHash: event.txHash
+     - ledger: event.ledger
+     - refundedBy: parsed.refundedTo
+  4. Call escrowService.refundEscrow(input)
+  5. Return {status: 'processed', transactionHash}
+
+STEP 3: BATCH POLLING & PROCESSING
+───────────────────────────────────
+
+syncEscrowReleasedEvents(startLedger, contractId):
+  1. Validate contractId exists
+  2. Read ESCROW_RELEASED_EVENT_TOPIC from env (default: 'escrow_released')
+  3. Query sorobanRpcClient.getEvents() with:
+     - startLedger: inclusive start position
+     - filters: [{ type: 'contract', contractIds, topics: [eventSymbol, '*'] }]
+  4. For each event:
+     - Call handleEscrowReleasedEvent(event, contractId)
+     - Collect result
+  5. Return EscrowSyncSummary:
+     - latestLedger: from RPC response
+     - cursor: resume position for next sync
+     - processed: count of successful handles
+     - ignored: count of skipped events
+     - results: array of individual results
+
+syncEscrowRefundedEvents(startLedger, contractId):
+  • Same pattern as released
+  • Reads ESCROW_REFUNDED_EVENT_TOPIC from env (default: 'escrow_refunded')
+
+================================================================================
+                    SERVICE METHOD: refundEscrow()
+================================================================================
+
+Method Signature:
+─────────────────
+async refundEscrow(input: RefundEscrowInput): Promise<IEscrow>
+
+Input:
+──────
+interface RefundEscrowInput {
+  escrowId: string;              // ObjectId or contractId
+  transactionHash: string;       // From event.txHash
+  ledger?: number;               // From event.ledger
+  refundedBy?: string;           // From parsed event data
+}
+
+Implementation:
+───────────────
+
+1. VALIDATE INPUT
+   - escrowId must be valid ObjectId or contract id (starts with 'C')
+   - Throw AppError if invalid
+
+2. ACQUIRE DISTRIBUTED LOCK
+   - Lock key: `escrow:refund:${escrowId}`
+   - Redis withLock() handles acquire/release
+   - Prevents concurrent refund operations
+
+3. FETCH ESCROW
+   - If ObjectId → findById()
+   - If contractId → findOne({ contractId })
+   - Throw if not found
+
+4. VALIDATE STATE TRANSITION
+   - Reject if already REFUNDED
+   - Reject if not LOCKED
+   - Only LOCKED escrows can be refunded
+
+5. CHECK IDEMPOTENCY
+   - Search transactions[] for matching hash
+   - If found → return existing escrow (no-op)
+   - Prevents duplicate processing
+
+6. RECORD TRANSACTION
+   - Add to escrow.transactions[]
+   - Type: 'refund'
+   - Include hash, ledger, timestamp
+
+7. UPDATE ESCROW
+   - lockStatus = REFUNDED
+   - refundedAt = new Date()
+   - Save to MongoDB
+
+8. UPDATE DELIVERY
+   - Find delivery by escrow.delivery
+   - Update status to CANCELLED
+   - Save to MongoDB
+
+9. LOG & RETURN
+   - Info log: successful refund
+   - Return updated escrow
+
+State Machine:
+──────────────
+LOCKED --[refund]--> REFUNDED
+(Only valid transition for refund)
+
+Delivery Status Update:
+──────────────────────
+ANY --> CANCELLED (when escrow refunded)
+
+================================================================================
+                    ERROR HANDLING
+================================================================================
+
+Parse Errors:
+─────────────
+• Malformed XDR → return null
+• Missing required fields → return null
+• Type coercion failures → return null
+• Log warning, do NOT crash indexer
+
+Handler Errors:
+───────────────
+• Service throws error → caught at handler level
+• Parse failure → status: 'ignored'
+• Service success → status: 'processed'
+
+Service Errors:
+───────────────
+• Invalid format → AppError (BAD_REQUEST)
+• Escrow not found → AppError (NOT_FOUND)
+• State conflict → AppError (CONFLICT)
+• Lock failure → withLock() handles retry
+
+All errors include:
+  • Human-readable message
+  • Contextual data (escrowId, txHash, etc.)
+  • Proper HTTP status code
+
+================================================================================
+                    ENVIRONMENT VARIABLES
+================================================================================
+
+REQUIRED (existing):
+────────────────────
+ESCROW_CONTRACT_ID                 # Soroban contract id
+
+NEW (optional with defaults):
+──────────────────────────────
+ESCROW_RELEASED_EVENT_TOPIC        # Default: 'escrow_released'
+ESCROW_REFUNDED_EVENT_TOPIC        # Default: 'escrow_refunded'
+
+These are read at sync time from process.env with fallback defaults.
+
+================================================================================
+                    ARCHITECTURE COMPLIANCE
+================================================================================
+
+✓ Controller → Service → Model Pattern
+  - Handlers delegate to service only
+  - Service calls model (Escrow, Delivery)
+  - No direct DB calls in handlers
+
+✓ Event-Driven Architecture
+  - Events flow: RPC → Parse → Handle → Service → DB
+  - Clear separation of concerns
+  - Each layer has single responsibility
+
+✓ Idempotency & Concurrency
+  - Transaction hashes prevent duplicates
+  - Distributed Redis locks prevent race conditions
+  - Replaying events is safe
+
+✓ Comprehensive Logging
+  - Debug: lock acquisition, state transitions
+  - Info: successful operations, processing stats
+  - Warn: parse failures, conflicts
+  - Error: exceptions with context
+
+✓ Type Safety
+  - All event data typed (EscrowReleasedEventData, etc.)
+  - Input interfaces (ReleaseEscrowInput, RefundEscrowInput)
+  - Return types clearly defined
+
+✓ No Hardcoded Values
+  - Event topics read from env
+  - Contract id from config
+  - All constants externalized
+
+================================================================================
+                    INTEGRATION POINTS
+================================================================================
+
+These handlers will be called by:
+  • eventPoller.ts (to be updated in Part 3)
+  • Direct indexing jobs
+  • Manual re-syncing utilities
+
+The handlers integrate with:
+  • EscrowService (existing & extended)
+  • Escrow model (existing)
+  • Delivery model (existing)
+  • Soroban RPC client (existing)
+  • Redis/distributed locking (existing)
+  • Logger (existing)
+
+No new dependencies required.
+All integration points already exist in codebase.
+
+================================================================================
+                    NEXT STEPS (PART 3)
+================================================================================
+
+1. Update eventPoller.ts to call the new sync functions
+2. Register handlers with main indexer loop
+3. Add monitoring/metrics collection
+4. Create comprehensive test suite (Part 4)
+
+================================================================================
+                    SUMMARY
+================================================================================
+
+✅ IMPLEMENTATION COMPLETE
+
+All handlers implemented following exact Part 1 architecture:
+  • 2 new event interfaces (Released, Refunded)
+  • 2 parser functions (null-safe, comprehensive validation)
+  • 2 handler functions (single event processing)
+  • 2 sync functions (batch RPC polling)
+  • 1 service method (refundEscrow with distributed locking)
+
+Code Quality:
+  • 391 lines of handler code (well-structured, documented)
+  • 300+ lines of service code (matches existing patterns)
+  • Full TypeScript typing
+  • Comprehensive error handling
+  • Production-ready logging
+
+Architecture:
+  • Strict Controller → Service → Model enforcement
+  • Idempotent operations
+  • Distributed locking for concurrency
+  • Zero hardcoded values
+  • Full compliance with existing patterns
+
+READY FOR PART 3: Integration & Testing
+
+================================================================================

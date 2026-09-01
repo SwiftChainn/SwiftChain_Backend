@@ -12,7 +12,6 @@ import {
   shutdownSocketServer,
   TypedServer,
 } from '../sockets/connectionHandler';
-import env from '../config/env';
 
 /** Default max time (ms) to wait before forcing process exit. */
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -54,7 +53,7 @@ export class GracefulShutdownService {
     this.exitFn = options.exitFn ?? ((code: number) => process.exit(code));
     this.timeoutMs =
       options.timeoutMs ??
-      env.SHUTDOWN_TIMEOUT_MS;
+      parseInt(process.env.SHUTDOWN_TIMEOUT_MS ?? String(DEFAULT_SHUTDOWN_TIMEOUT_MS), 10);
   }
 
   /**

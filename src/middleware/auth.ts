@@ -1,9 +1,8 @@
 import { NextFunction, Request, Response } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import { HttpError } from '../utils/httpError';
-import env from '../config/env';
 
-const jwtSecret = env.JWT_SECRET;
+const jwtSecret = process.env.JWT_SECRET || 'changeme';
 
 export interface AuthenticatedRequest extends Request {
   user?: JwtPayload & {

@@ -28,8 +28,6 @@ let mongoServer: MongoMemoryServer;
 beforeAll(async () => {
   mongoServer = await MongoMemoryServer.create();
   await mongoose.connect(mongoServer.getUri());
-  // authService.generateToken reads process.env.JWT_SECRET directly
-  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test_secret_at_least_16_chars';
   const mod = await import('../src/app');
   app = mod.default;
 });
@@ -77,7 +75,7 @@ describe('POST /api/v1/auth/login', () => {
       });
 
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
+      expect(res.body.status).toBe('success');
       expect(res.body.message).toBe('Login successful');
       expect(res.body.data).toHaveProperty('token');
       expect(res.body.data).toHaveProperty('user');
@@ -137,7 +135,7 @@ describe('POST /api/v1/auth/login', () => {
       });
 
       expect(res.status).toBe(401);
-      expect(res.body.success).toBe(false);
+      expect(res.body.status).toBe('error');
       expect(res.body.message).toBe('Invalid email or password');
     });
 
@@ -150,7 +148,7 @@ describe('POST /api/v1/auth/login', () => {
       });
 
       expect(res.status).toBe(401);
-      expect(res.body.success).toBe(false);
+      expect(res.body.status).toBe('error');
       expect(res.body.message).toBe('Invalid email or password');
     });
 
@@ -163,7 +161,7 @@ describe('POST /api/v1/auth/login', () => {
       });
 
       expect(res.status).toBe(401);
-      expect(res.body.success).toBe(false);
+      expect(res.body.status).toBe('error');
       expect(res.body.message).toContain('deactivated');
     });
 
@@ -190,7 +188,7 @@ describe('POST /api/v1/auth/login', () => {
       const res = await request(app).post('/api/v1/auth/login').send({});
 
       expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
+      expect(res.body.status).toBe('error');
       expect(res.body.message).toBe('Validation failed');
       expect(res.body.errors).toBeDefined();
       expect(res.body.errors.length).toBeGreaterThan(0);
@@ -203,7 +201,7 @@ describe('POST /api/v1/auth/login', () => {
       });
 
       expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
+      expect(res.body.status).toBe('error');
       expect(res.body.errors).toBeDefined();
     });
 
@@ -213,7 +211,7 @@ describe('POST /api/v1/auth/login', () => {
       });
 
       expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
+      expect(res.body.status).toBe('error');
     });
 
     it('should return 400 for missing email', async () => {
@@ -222,7 +220,7 @@ describe('POST /api/v1/auth/login', () => {
       });
 
       expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
+      expect(res.body.status).toBe('error');
     });
   });
 
@@ -261,7 +259,7 @@ describe('POST /api/v1/auth/register', () => {
     const res = await request(app).post('/api/v1/auth/register').send(validUser);
 
     expect(res.status).toBe(201);
-    expect(res.body).toHaveProperty('success', true);
+    expect(res.body).toHaveProperty('status', 'success');
     expect(res.body.data.user).toMatchObject({
       firstName: validUser.firstName,
       lastName: validUser.lastName,
@@ -291,7 +289,7 @@ describe('POST /api/v1/auth/register', () => {
     const res = await request(app).post('/api/v1/auth/register').send(validUser);
 
     expect(res.status).toBe(409);
-    expect(res.body).toHaveProperty('success', false);
+    expect(res.body).toHaveProperty('status', 'error');
   });
 
   it('rejects an invalid email with 400', async () => {

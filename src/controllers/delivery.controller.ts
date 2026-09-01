@@ -8,7 +8,6 @@ import {
   DeliveryFilter,
   AssignDriverInput,
 } from '../services/delivery.service';
-import { sendSuccess } from '../utils/responseWrapper';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string };
@@ -29,7 +28,10 @@ export class DeliveryController {
       };
 
       const delivery = await deliveryService.create(input);
-      sendSuccess(res, delivery, 'Delivery created successfully', httpStatus.CREATED);
+      res.status(httpStatus.CREATED).json({
+        status: 'success',
+        data: delivery,
+      });
     } catch (error) {
       next(error);
     }
@@ -38,7 +40,10 @@ export class DeliveryController {
   async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const delivery = await deliveryService.getById(req.params.id);
-      sendSuccess(res, delivery, 'Delivery retrieved successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: delivery,
+      });
     } catch (error) {
       next(error);
     }
@@ -63,20 +68,16 @@ export class DeliveryController {
       };
 
       const result = await deliveryService.list(filters);
-      sendSuccess(
-        res,
-        {
-          deliveries: result.data,
-          meta: {
-            total: result.total,
-            page: result.page,
-            limit: result.limit,
-            totalPages: result.totalPages,
-          },
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: result.data,
+        meta: {
+          total: result.total,
+          page: result.page,
+          limit: result.limit,
+          totalPages: result.totalPages,
         },
-        'Deliveries retrieved successfully',
-        httpStatus.OK,
-      );
+      });
     } catch (error) {
       next(error);
     }
@@ -94,7 +95,10 @@ export class DeliveryController {
       };
 
       const delivery = await deliveryService.update(req.params.id, input);
-      sendSuccess(res, delivery, 'Delivery updated successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: delivery,
+      });
     } catch (error) {
       next(error);
     }
@@ -104,7 +108,11 @@ export class DeliveryController {
     try {
       const userId = (req as AuthenticatedRequest).user?.id;
       const delivery = await deliveryService.archive(req.params.id, userId);
-      sendSuccess(res, delivery, 'Delivery archived successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: delivery,
+        message: 'Delivery archived successfully',
+      });
     } catch (error) {
       next(error);
     }
@@ -113,7 +121,11 @@ export class DeliveryController {
   async restore(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const delivery = await deliveryService.restore(req.params.id);
-      sendSuccess(res, delivery, 'Delivery restored successfully', httpStatus.OK);
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: delivery,
+        message: 'Delivery restored successfully',
+      });
     } catch (error) {
       next(error);
     }
@@ -125,20 +137,16 @@ export class DeliveryController {
       const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
 
       const result = await deliveryService.listArchived(page, limit);
-      sendSuccess(
-        res,
-        {
-          deliveries: result.data,
-          meta: {
-            total: result.total,
-            page: result.page,
-            limit: result.limit,
-            totalPages: result.totalPages,
-          },
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        data: result.data,
+        meta: {
+          total: result.total,
+          page: result.page,
+          limit: result.limit,
+          totalPages: result.totalPages,
         },
-        'Archived deliveries retrieved successfully',
-        httpStatus.OK,
-      );
+      });
     } catch (error) {
       next(error);
     }
@@ -169,7 +177,12 @@ export class DeliveryController {
       };
 
       const delivery = await deliveryService.assignDriver(input);
-      sendSuccess(res, delivery, 'Driver assigned successfully.', httpStatus.OK);
+
+      res.status(httpStatus.OK).json({
+        status: 'success',
+        message: 'Driver assigned successfully.',
+        data: delivery,
+      });
     } catch (error) {
       next(error);
     }

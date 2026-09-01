@@ -18,7 +18,6 @@ import type {
 import type { IUser } from '../interfaces/IUser';
 import AppError from '../utils/AppError';
 import { DisputeReason, DisputeStatus } from '../models/Dispute';
-import { sendSuccess } from '../utils/responseWrapper';
 
 // ─── POST /api/v1/disputes ──────────────────────────────────────
 
@@ -44,7 +43,11 @@ export const openDispute = async (
       evidenceUrls,
     });
 
-    sendSuccess(res, { dispute }, 'Dispute opened successfully.', StatusCodes.CREATED);
+    res.status(StatusCodes.CREATED).json({
+      status: 'success',
+      message: 'Dispute opened successfully.',
+      data: { dispute },
+    });
   } catch (error) {
     next(error);
   }
@@ -59,7 +62,11 @@ export const getDispute = async (
 ): Promise<void> => {
   try {
     const dispute = await getDisputeById(req.params.id);
-    sendSuccess(res, { dispute }, 'Dispute retrieved successfully', StatusCodes.OK);
+
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      data: { dispute },
+    });
   } catch (error) {
     next(error);
   }
@@ -102,20 +109,16 @@ export const listDisputes = async (
 
     const result = await getDisputes(filters);
 
-    sendSuccess(
-      res,
-      {
-        disputes: result.data,
-        meta: {
-          total: result.total,
-          page: result.page,
-          limit: result.limit,
-          totalPages: result.totalPages,
-        },
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      data: result.data,
+      meta: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages,
       },
-      'Disputes retrieved successfully',
-      StatusCodes.OK,
-    );
+    });
   } catch (error) {
     next(error);
   }
@@ -141,7 +144,11 @@ export const resolveDisputeController = async (
       resolvedBy: user._id.toString(),
     });
 
-    sendSuccess(res, { dispute }, `Dispute ${dispute.status} successfully.`, StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: `Dispute ${dispute.status} successfully.`,
+      data: { dispute },
+    });
   } catch (error) {
     next(error);
   }
@@ -159,7 +166,11 @@ export const addEvidenceController = async (
       evidenceUrls: req.body.evidenceUrls,
     });
 
-    sendSuccess(res, { dispute }, 'Evidence added successfully.', StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: 'Evidence added successfully.',
+      data: { dispute },
+    });
   } catch (error) {
     next(error);
   }
@@ -175,7 +186,11 @@ export const updateDisputeController = async (
   try {
     const dispute = await updateDispute(req.params.id, req.body);
 
-    sendSuccess(res, { dispute }, 'Dispute updated successfully.', StatusCodes.OK);
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      message: 'Dispute updated successfully.',
+      data: { dispute },
+    });
   } catch (error) {
     next(error);
   }

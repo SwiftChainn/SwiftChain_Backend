@@ -3,7 +3,6 @@ import { StatusCodes } from 'http-status-codes';
 import { uploadEvidence, getEvidenceForDispute } from '../services/evidenceService';
 import type { IUser } from '../interfaces/IUser';
 import AppError from '../utils/AppError';
-import { sendSuccess } from '../utils/responseWrapper';
 
 // ─── Request body type ─────────────────────────────────────────────────────────
 
@@ -17,7 +16,16 @@ interface UploadEvidenceBody {
  * POST /api/v1/uploads/evidence
  *
  * Uploads a single piece of media evidence (image, video, or PDF) for a
- * delivery dispute.
+ * delivery dispute. The route is protected by `authenticate`; the file is
+ * parsed by the `multer` middleware configured in `uploadRoutes`.
+ *
+ * multipart/form-data:
+ *   - file       {File}   Required — the evidence file.
+ *   - disputeId  {string} Required — MongoDB ObjectId of the dispute.
+ *
+ * Responds:
+ *   201 — success, returns the persisted evidence record including its
+ *         secure URL.
  */
 export const uploadEvidenceHandler = async (
   req: Request<unknown, unknown, UploadEvidenceBody>,
@@ -49,7 +57,11 @@ export const uploadEvidenceHandler = async (
       sizeBytes: file.size,
     });
 
-    sendSuccess(res, { evidence }, 'Evidence uploaded successfully.', StatusCodes.CREATED);
+    res.status(StatusCodes.CREATED).json({
+      status: 'success',
+      message: 'Evidence uploaded successfully.',
+      data: { evidence },
+    });
   } catch (error) {
     next(error);
   }
@@ -69,12 +81,10 @@ export const listEvidenceHandler = async (
     const { disputeId } = req.params;
     const evidence = await getEvidenceForDispute(disputeId);
 
-    sendSuccess(
-      res,
-      { evidence, count: evidence.length },
-      'Evidence retrieved successfully',
-      StatusCodes.OK,
-    );
+    res.status(StatusCodes.OK).json({
+      status: 'success',
+      data: { evidence, count: evidence.length },
+    });
   } catch (error) {
     next(error);
   }
