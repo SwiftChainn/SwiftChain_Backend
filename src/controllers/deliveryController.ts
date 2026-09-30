@@ -1,3 +1,8 @@
+/**
+ * @deprecated Use `src/controllers/delivery.controller.ts` for canonical
+ * delivery endpoints. This controller remains only for the legacy ETA route.
+ */
+
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import { deliveryService } from '../services/deliveryService';

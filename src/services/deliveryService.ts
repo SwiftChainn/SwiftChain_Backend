@@ -1,3 +1,8 @@
+/**
+ * @deprecated Use `src/services/delivery.service.ts` for the canonical delivery
+ * service. This module remains only for the legacy ETA/QR compatibility route.
+ */
+
 import { Delivery, DeliveryStatus } from '../models/Delivery';
 import { routingService, ETARequest } from './routingService';
 import QRCode from 'qrcode';

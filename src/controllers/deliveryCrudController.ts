@@ -1,3 +1,8 @@
+/**
+ * @deprecated Use `src/controllers/delivery.controller.ts` and the canonical
+ * delivery routes. This standalone handler module is retained for compatibility.
+ */
+
 import { Request, Response, NextFunction } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import crypto from 'crypto';

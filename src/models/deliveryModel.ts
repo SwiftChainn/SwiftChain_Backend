@@ -1,3 +1,8 @@
+/**
+ * @deprecated Use `src/models/Delivery.ts`. The canonical model is registered
+ * in the DI container as `deliveryModel`.
+ */
+
 import mongoose, { Document, Model, Schema } from 'mongoose';
 
 export type DeliveryStatus = 'pending' | 'assigned' | 'picked_up' | 'in_transit' | 'delivered';

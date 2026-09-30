@@ -4,7 +4,11 @@ import env from '../config/env';
 import registerSocketHandlers from './socketController';
 import logger from '../config/logger';
 import socketAuth from '../middlewares/socketAuth';
-import env from '../config/env';
+
+/**
+ * @deprecated The live Socket.IO entrypoint is `connectionHandler.ts`. Keep
+ * this compatibility initializer out of new imports and registrations.
+ */
 
 let realtimeNsp: Namespace | null = null;
 
