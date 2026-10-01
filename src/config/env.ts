@@ -85,6 +85,10 @@ interface EnvConfig {
   SOCKET_MAX_MISSED_PONGS: number;
   /** Time (ms) a queued socket message waits for an ack before retry. Default: 15000 */
   SOCKET_MESSAGE_ACK_TIMEOUT_MS: number;
+  /** Max unacknowledged messages retained per driver before oldest are evicted. Default: 100 */
+  SOCKET_MESSAGE_QUEUE_MAX: number;
+  /** Max automatic re-delivery attempts per queued message after ACK timeouts. Default: 5 */
+  SOCKET_MESSAGE_MAX_RETRIES: number;
   /** Interval (ms) between periodic socket token expiry checks. Default: 60000 */
   SOCKET_TOKEN_CHECK_INTERVAL_MS: number;
   /** Grace period (ms) granted after a socket token expires. Default: 30000 */
@@ -298,6 +302,8 @@ const envSchema = z.object({
   SOCKET_PING_TIMEOUT_MS: z.coerce.number().int().min(1000).default(20000),
   SOCKET_MAX_MISSED_PONGS: z.coerce.number().int().min(1).max(10).default(2),
   SOCKET_MESSAGE_ACK_TIMEOUT_MS: z.coerce.number().int().min(1000).default(15000),
+  SOCKET_MESSAGE_QUEUE_MAX: z.coerce.number().int().min(1).default(100),
+  SOCKET_MESSAGE_MAX_RETRIES: z.coerce.number().int().min(0).max(20).default(5),
   SOCKET_TOKEN_CHECK_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
   SOCKET_TOKEN_GRACE_PERIOD_MS: z.coerce.number().int().min(0).default(30000),
   SYNC_BATCH_SIZE_LIMIT: z.coerce.number().int().min(1).max(10000).default(500),
