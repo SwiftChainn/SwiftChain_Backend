@@ -38,15 +38,14 @@ The container must point canonical tokens at canonical modules.
 
 The following files are retained only for compatibility and must not receive new features:
 
-| Legacy file                                 | Canonical replacement                    |
-| ------------------------------------------- | ---------------------------------------- |
-| `src/services/deliveryService.ts`           | `src/services/delivery.service.ts`       |
-| `src/controllers/deliveryController.ts`     | `src/controllers/delivery.controller.ts` |
-| `src/controllers/deliveryCrudController.ts` | `src/controllers/delivery.controller.ts` |
-| `src/models/deliveryModel.ts`               | `src/models/Delivery.ts`                 |
-| `src/sockets/index.ts`                      | `src/sockets/connectionHandler.ts`       |
+| Legacy file                             | Canonical replacement                    | Status                                      |
+| --------------------------------------- | ---------------------------------------- | ------------------------------------------- |
+| `src/services/deliveryService.ts`       | `src/services/delivery.service.ts`       | Retained compatibility service (deprecated) |
+| `src/controllers/deliveryController.ts` | `src/controllers/delivery.controller.ts` | Compatibility shim re-export (deprecated)   |
+| `src/models/deliveryModel.ts`           | `src/models/Delivery.ts`                 | Retained legacy model (deprecated)          |
 
-Each retained legacy file has a deprecation banner. The former `src/services/escrowService.ts` was
-removed; use `src/services/escrow.service.ts` and do not recreate the removed parallel stack.
+Each retained legacy file has a deprecation banner. The former `src/services/escrowService.ts`,
+`src/controllers/deliveryCrudController.ts`, and `src/sockets/index.ts` have been removed; use their
+canonical replacements and do not recreate removed parallel stacks.
 
 Before adding a file, search `src/` for the canonical implementation and update it when one exists.
