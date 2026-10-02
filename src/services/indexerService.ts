@@ -1,7 +1,7 @@
 import EventLog from '../models/EventLog';
 import Delivery from '../models/Delivery';
 import logger from '../config/logger';
-import { emitDeliveryStatusUpdated } from '../sockets';
+import { emitDeliveryStatusUpdated } from '../sockets/connectionHandler';
 import type { ISorobanRpcClient } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
 export interface IndexerStatusData {

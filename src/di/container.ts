@@ -43,7 +43,7 @@ import IdempotencyRecord from '../models/IdempotencyRecord';
 
 // ─── Services ──────────────────────────────────────────────────────────────────
 import authService from '../services/authService';
-import { deliveryService } from '../services/deliveryService';
+import { deliveryService } from '../services/delivery.service';
 import { driverService } from '../services/driverService';
 import { driverRatingService } from '../services/driverRatingService';
 import * as fleetService from '../services/fleetService';
