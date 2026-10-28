@@ -18,6 +18,7 @@ interface EnvConfig {
   CORS_ORIGIN: string;
   RATE_LIMIT_WINDOW_MS: number;
   RATE_LIMIT_MAX_REQUESTS: number;
+  ENABLE_METRICS: boolean;
   DISPUTE_NOTIFICATION_WEBHOOK_URL: string;
   FEATURE_FLAGS: string;
   FEATURE_WEBHOOK_BATCHING_ENABLED?: boolean;
@@ -274,6 +275,12 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('*'),
   RATE_LIMIT_WINDOW_MS: numeric(z.coerce.number().int().min(1000).default(900000)),
   RATE_LIMIT_MAX_REQUESTS: numeric(z.coerce.number().int().min(1).default(100)),
+  ENABLE_METRICS: z.preprocess(
+    blankToUndefined,
+    z.enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
+  ),
   DISPUTE_NOTIFICATION_WEBHOOK_URL: z.string().default(''),
   FEATURE_FLAGS: z.string().trim().default(''),
   FEATURE_WEBHOOK_BATCHING_ENABLED: z.preprocess(
@@ -319,8 +326,13 @@ const envSchema = z.object({
   PROFILE_PICTURE_QUALITY: z.string().optional(),
 
   // ── Indexer lag monitoring ─────────────────────────────────────────────────
-  INDEXER_LAG_ALERT_THRESHOLD: numeric(z.coerce.number().int().min(1).default(100)),
-  INDEXER_LAG_CHECK_INTERVAL_MS: numeric(z.coerce.number().int().min(1000).default(60000)),
+  // ── Indexer lag monitoring ─────────────────────────────────────────────────
+  INDEXER_LAG_ALERT_THRESHOLD: numeric(
+    z.coerce.number().int().min(1).default(100),
+  ),
+  INDEXER_LAG_CHECK_INTERVAL_MS: numeric(
+    z.coerce.number().int().min(1000).default(60000),
+  ),
   INDEXER_LAG_WEBHOOK_URL: z.string().trim().default(''),
 
   // ── Soroban RPC retry config ────────────────────────────────────────────────
