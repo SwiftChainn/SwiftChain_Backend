@@ -1,10 +1,11 @@
 import { Namespace, Socket } from 'socket.io';
 import { IChatMessage } from '../models/ChatMessage';
 import logger from '../config/logger';
-import { deliveryRoom } from './location.service';
+import { isEnabled } from '../config/flags';
 import {
   ChatMessageService,
   IncomingChatMessage,
+  ChatFeatureDisabledError,
   InvalidChatMessageError,
   chatMessageService,
 } from './chatMessage.service';
@@ -34,6 +35,8 @@ export class SocketService {
    * client's failed backlog must not tear down the connection handler.
    */
   public async handleConnection(socket: Socket, _nsp: Namespace): Promise<void> {
+    if (!isEnabled('chat')) return;
+
     try {
       const recent = await this.chat.getRecentTranscript();
       socket.emit('recentMessages', recent);
@@ -57,6 +60,11 @@ export class SocketService {
     payload: IncomingChatMessage,
     socket?: Socket,
   ): Promise<void> {
+    if (!isEnabled('chat')) {
+      socket?.emit('error', { message: 'Chat is disabled' });
+      return;
+    }
+
     try {
       const message = await this.chat.createMessage(payload);
       if (message.deliveryId && typeof nsp.to === 'function') {
@@ -66,6 +74,11 @@ export class SocketService {
         nsp.emit('message', message);
       }
     } catch (error) {
+      if (error instanceof ChatFeatureDisabledError) {
+        socket?.emit('error', { message: 'Chat is disabled' });
+        return;
+      }
+
       if (error instanceof InvalidChatMessageError) {
         logger.warn(`[SocketService] Rejected invalid message: ${error.message}`);
         socket?.emit('error', { message: error.message });

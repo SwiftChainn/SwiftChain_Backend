@@ -17,6 +17,7 @@ import type { IRoutingProvider } from './providers/routingProvider';
 import { encodeGeohash } from '../utils/geohash';
 import logger from '../config/logger';
 import env from '../config/env';
+import { isEnabled } from '../config/flags';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,11 @@ export class PoolingService {
    * Find pending/funded deliveries and group them into proximity-based pools.
    */
   async createPools(options: PoolingOptions = {}): Promise<DeliveryPool[]> {
+    if (!isEnabled('deliveryPooling')) {
+      logger.debug('[PoolingService] Delivery pooling is disabled by feature flag.');
+      return [];
+    }
+
     const proximity = options.maxProximityMeters ?? this.DEFAULT_PROXIMITY_M;
     const maxSize = options.maxPoolSize ?? this.DEFAULT_MAX_POOL_SIZE;
     const statuses = options.statuses ?? [DeliveryStatus.PENDING, DeliveryStatus.FUNDED];
@@ -152,6 +158,10 @@ export class PoolingService {
    * deliveries in the pool.
    */
   async assignPoolToNearestDriver(pool: DeliveryPool): Promise<AssignPoolResult> {
+    if (!isEnabled('deliveryPooling')) {
+      return { assigned: false, reason: 'Delivery pooling is disabled by feature flag' };
+    }
+
     if (pool.deliveries.length === 0) {
       return { assigned: false, reason: 'Empty pool' };
     }

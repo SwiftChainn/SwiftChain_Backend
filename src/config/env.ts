@@ -19,6 +19,11 @@ interface EnvConfig {
   RATE_LIMIT_WINDOW_MS: number;
   RATE_LIMIT_MAX_REQUESTS: number;
   DISPUTE_NOTIFICATION_WEBHOOK_URL: string;
+  FEATURE_FLAGS: string;
+  FEATURE_WEBHOOK_BATCHING_ENABLED?: boolean;
+  FEATURE_DELIVERY_POOLING_ENABLED?: boolean;
+  FEATURE_CHAT_ENABLED?: boolean;
+  FEATURE_MILESTONES_ENABLED?: boolean;
   UPLOAD_STORAGE_DRIVER: string;
   UPLOAD_LOCAL_DIR: string;
   UPLOAD_MAX_FILE_SIZE_MB: number;
@@ -270,6 +275,23 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW_MS: numeric(z.coerce.number().int().min(1000).default(900000)),
   RATE_LIMIT_MAX_REQUESTS: numeric(z.coerce.number().int().min(1).default(100)),
   DISPUTE_NOTIFICATION_WEBHOOK_URL: z.string().default(''),
+  FEATURE_FLAGS: z.string().trim().default(''),
+  FEATURE_WEBHOOK_BATCHING_ENABLED: z.preprocess(
+    blankToUndefined,
+    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+  ),
+  FEATURE_DELIVERY_POOLING_ENABLED: z.preprocess(
+    blankToUndefined,
+    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+  ),
+  FEATURE_CHAT_ENABLED: z.preprocess(
+    blankToUndefined,
+    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+  ),
+  FEATURE_MILESTONES_ENABLED: z.preprocess(
+    blankToUndefined,
+    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+  ),
 
   // ── Uploads / storage ──────────────────────────────────────────────────────
   UPLOAD_STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),

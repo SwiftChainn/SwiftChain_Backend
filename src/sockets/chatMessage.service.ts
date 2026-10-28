@@ -1,8 +1,5 @@
-import { Types } from 'mongoose';
-import { IChatMessage, IReadReceipt } from '../models/ChatMessage';
-import Delivery from '../models/Delivery';
-import User from '../models/User';
-import { UserRole } from '../interfaces/IUser';
+import { IChatMessage } from '../models/ChatMessage';
+import { isEnabled } from '../config/flags';
 import {
   ChatMessageRepository,
   chatMessageRepository,
@@ -40,6 +37,14 @@ export class InvalidChatMessageError extends Error {
   }
 }
 
+/** Raised when chat is disabled and a caller attempts to persist a message. */
+export class ChatFeatureDisabledError extends Error {
+  constructor() {
+    super('Chat is disabled by feature flag');
+    this.name = 'ChatFeatureDisabledError';
+  }
+}
+
 /**
  * Chat domain logic, decoupled from Socket.IO transport.
  *
@@ -53,8 +58,25 @@ export class ChatMessageService {
   /**
    * Validate an incoming raw payload.
    *
-   * @throws {InvalidChatMessageError} If content is missing, the wrong type,
-   * empty, or exceeds the length limit; or if sender is provided but not a string.
+   * The query returns newest-first to use the descending `createdAt` index;
+   * the reversal to reading order happens here rather than in the handler so
+   * every caller gets the same ordering.
+   */
+  async getRecentTranscript(limit: number = RECENT_MESSAGE_LIMIT): Promise<IChatMessage[]> {
+    if (!isEnabled('chat')) return [];
+
+    const recent = await this.messages.findRecent(limit);
+    return recent.reverse();
+  }
+
+  /**
+   * Validate an untrusted payload from a client.
+   *
+   * Socket payloads bypass Express middleware entirely, so this is the only
+   * validation boundary for realtime input — it must not assume any prior
+   * checking.
+   *
+   * @throws {InvalidChatMessageError} If the payload is unusable.
    */
   validate(payload: IncomingChatMessage): ValidatedChatMessage {
     if (payload === null || typeof payload !== 'object') {
@@ -123,6 +145,8 @@ export class ChatMessageService {
    * @throws {InvalidChatMessageError} If the payload is unusable.
    */
   async createMessage(payload: IncomingChatMessage): Promise<IChatMessage> {
+    if (!isEnabled('chat')) throw new ChatFeatureDisabledError();
+
     const validated = this.validate(payload);
 
     let recipients: Types.ObjectId[] = validated.recipients ?? [];
