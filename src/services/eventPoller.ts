@@ -28,6 +28,13 @@ import env from '../config/env';
 import logger from '../config/logger';
 import { nextEventLogRetryAt } from '../utils/eventLogBackoff';
 import { handleEscrowFundedEvent } from '../indexer/escrowHandlers';
+import {
+  EventFamily,
+  EventPayloadValidationError,
+  getEventPayloadSchema,
+  validateSorobanEventPayload,
+} from '../validators/eventSchemas';
+import { contractAbiService } from './contractAbiService';
 import type { ISorobanRpcClient, SorobanGetEventsRequest } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
 
@@ -54,6 +61,10 @@ export interface EventPollerOptions {
   intervalMs: number;
   /** Events requested per `getEvents` page. */
   pageSize: number;
+  /** Validate decoded payloads with Zod before handler dispatch. Default: true. */
+  validatePayloads?: boolean;
+  /** Optional pause predicate (defaults to ContractAbiService hard-mismatch pause state). */
+  isPaused?: () => boolean;
 }
 
 export interface PollCycleResult {
@@ -102,11 +113,15 @@ export class EventPoller implements EventReplayer {
   private readonly options: EventPollerOptions;
   private readonly subscriptionsByTopic: Map<string, EventSubscription>;
   private readonly filters: SorobanGetEventsRequest['filters'];
+  private readonly validatePayloads: boolean;
+  private readonly isPaused: () => boolean;
   private timer: ReturnType<typeof setInterval> | null = null;
   private inFlight: Promise<void> | null = null;
 
   constructor(options: EventPollerOptions) {
     this.options = options;
+    this.validatePayloads = options.validatePayloads ?? true;
+    this.isPaused = options.isPaused ?? ((): boolean => contractAbiService.isIngestionPaused());
     this.subscriptionsByTopic = new Map(
       options.subscriptions.map((subscription) => [topicKey(subscription.topic), subscription]),
     );
@@ -138,6 +153,23 @@ export class EventPoller implements EventReplayer {
    */
   async pollOnce(): Promise<PollCycleResult> {
     const { network, rpc } = this.options;
+
+    if (this.isPaused()) {
+      const checkpoint = await IndexerStatus.findOne({ network }).lean();
+      const ledger = checkpoint?.lastProcessedLedger ?? 0;
+      logger.warn(
+        `[EventPoller] Ingestion paused due to contract ABI mismatch — network=${network} ` +
+          `checkpoint=${ledger}`,
+      );
+      return {
+        fromLedger: ledger,
+        toLedger: ledger,
+        fetched: 0,
+        processed: 0,
+        duplicates: 0,
+        failed: 0,
+      };
+    }
 
     const latest = await rpc.getLatestLedger();
     const toLedger = latest.sequence;
@@ -207,7 +239,25 @@ export class EventPoller implements EventReplayer {
       );
     }
 
+    this.guardEventPayload(subscription, event);
     await subscription.handle(event);
+  }
+
+  /** Validate a decoded Soroban event against its registered Zod schema before dispatch. */
+  private guardEventPayload(
+    subscription: EventSubscription,
+    event: StellarRpc.Api.EventResponse,
+  ): void {
+    if (!this.validatePayloads || subscription.eventType === 'milestone') {
+      return;
+    }
+
+    const family = subscription.eventType as EventFamily;
+    if (!getEventPayloadSchema(family, subscription.topic)) {
+      return;
+    }
+
+    validateSorobanEventPayload(family, subscription.topic, event);
   }
 
   /** Find the event an EventLog entry recorded, matching on event id when one was stored. */
@@ -292,6 +342,7 @@ export class EventPoller implements EventReplayer {
     }
 
     try {
+      this.guardEventPayload(subscription, event);
       await handle(event);
       await EventLog.markAsProcessed(transactionHash, eventType);
       return 'processed';
@@ -306,10 +357,21 @@ export class EventPoller implements EventReplayer {
           nextRetryAt: nextEventLogRetryAt(1),
         },
       );
-      logger.error(
-        `[EventPoller] Handler failed — type=${eventType} tx=${transactionHash} ` +
-          `ledger=${event.ledger} error="${errorMessage}"`,
-      );
+      if (error instanceof EventPayloadValidationError) {
+        logger.error('[EventPoller] Event payload validation failed — skipping handler dispatch', {
+          eventType,
+          topic: subscription.topic,
+          transactionHash,
+          ledger: event.ledger,
+          issues: error.issues,
+          error: errorMessage,
+        });
+      } else {
+        logger.error(
+          `[EventPoller] Handler failed — type=${eventType} tx=${transactionHash} ` +
+            `ledger=${event.ledger} error="${errorMessage}"`,
+        );
+      }
       return 'failed';
     }
   }

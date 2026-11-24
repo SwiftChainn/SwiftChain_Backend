@@ -237,6 +237,28 @@ interface EnvConfig {
   // ── Admin dashboard ──────────────────────────────────────────────
   /** TTL (s) of the Redis cache for aggregated admin dashboard metrics. Default: 60 */
   ADMIN_DASHBOARD_CACHE_TTL_SECONDS: number;
+
+  // ── Contract ABI / interface version negotiation ─────────────────
+  /** Interval (ms) between periodic contract ABI version checks. Default: 300000 */
+  CONTRACT_ABI_CHECK_INTERVAL_MS: number;
+  /** Expected contract interface semantic version. Default: 1.0.0 */
+  CONTRACT_ABI_EXPECTED_VERSION: string;
+  /** Supported semver range for deployed contracts (e.g. ^1.0.0). Default: ^1.0.0 */
+  CONTRACT_ABI_SUPPORTED_RANGE: string;
+  /** Contract storage symbol key holding the interface version. Default: version */
+  CONTRACT_ABI_VERSION_KEY: string;
+
+  // ── Event cold-storage archiving ─────────────────────────────────
+  /** Number of days processed EventLog entries remain hot before archiving. Default: 90 */
+  EVENTLOG_RETENTION_DAYS: number;
+  /** Storage driver for cold event archives (local or s3). Default: local */
+  EVENT_ARCHIVE_STORAGE_DRIVER: 'local' | 's3';
+  /** Local filesystem directory for archived event batches. Default: archives/events */
+  EVENT_ARCHIVE_LOCAL_DIR: string;
+  /** S3 key prefix for archived event batches. Default: event-archives */
+  EVENT_ARCHIVE_S3_PREFIX: string;
+  /** Maximum processed EventLog records archived per batch. Default: 500 */
+  EVENT_ARCHIVE_BATCH_SIZE: number;
 }
 
 /**
@@ -460,6 +482,19 @@ const envSchema = z.object({
   // ── Admin dashboard ──────────────────────────────────────────────
   /** TTL (s) of the Redis cache for aggregated admin dashboard metrics. Default: 60 */
   ADMIN_DASHBOARD_CACHE_TTL_SECONDS: numeric(z.coerce.number().int().min(1).max(86400).default(60)),
+
+  // ── Contract ABI / interface version negotiation ─────────────────
+  CONTRACT_ABI_CHECK_INTERVAL_MS: numeric(z.coerce.number().int().min(1000).default(300000)),
+  CONTRACT_ABI_EXPECTED_VERSION: z.string().trim().min(1).default('1.0.0'),
+  CONTRACT_ABI_SUPPORTED_RANGE: z.string().trim().min(1).default('^1.0.0'),
+  CONTRACT_ABI_VERSION_KEY: z.string().trim().min(1).default('version'),
+
+  // ── Event cold-storage archiving ─────────────────────────────────
+  EVENTLOG_RETENTION_DAYS: numeric(z.coerce.number().int().min(1).default(90)),
+  EVENT_ARCHIVE_STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  EVENT_ARCHIVE_LOCAL_DIR: z.string().trim().min(1).default('archives/events'),
+  EVENT_ARCHIVE_S3_PREFIX: z.string().trim().min(1).default('event-archives'),
+  EVENT_ARCHIVE_BATCH_SIZE: numeric(z.coerce.number().int().min(1).max(10000).default(500)),
 });
 
 let env: EnvConfig;

@@ -8,7 +8,7 @@ import logger from '../config/logger';
 export class IndexerController {
   public async getStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const statusData = await indexerService.getIndexerStatus();
+      const statusData = await indexerService.getIndexerStatusOverview();
       sendSuccess(res, statusData, 'Indexer status retrieved successfully', StatusCodes.OK);
     } catch (error) {
       logger.error(

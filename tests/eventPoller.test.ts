@@ -9,7 +9,7 @@
 
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
+import { nativeToScVal, rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
 import EventLog from '../src/models/EventLog';
 import { IndexerStatus } from '../src/models/IndexerStatus';
 import { EventPoller, EventSubscription } from '../src/services/eventPoller';
@@ -63,8 +63,15 @@ const buildEvent = (
     ledgerClosedAt: '2026-10-21T00:00:00Z',
     contractId: CONTRACT_ID,
     txHash: overrides.txHash ?? `tx-${id}`,
-    topic: [xdr.ScVal.scvSymbol(overrides.topic ?? FUNDED_TOPIC)],
-    value: xdr.ScVal.scvVoid(),
+    topic: [
+      xdr.ScVal.scvSymbol(overrides.topic ?? FUNDED_TOPIC),
+      nativeToScVal(`delivery-${ledger}`, { type: 'string' }),
+    ],
+    value: nativeToScVal({
+      amount: 100n,
+      asset: 'XLM',
+      funded_by: 'GFUNDER123456',
+    }),
     inSuccessfulContractCall: true,
     pagingToken: id,
   } as unknown as StellarRpc.Api.EventResponse;

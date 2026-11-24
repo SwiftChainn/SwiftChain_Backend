@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import eventLogController from '../controllers/eventLogController';
+import { eventArchiveController } from '../controllers/eventArchiveController';
 import authenticate from '../middleware/authenticate';
 import requireRole from '../middleware/requireRole';
 import { UserRole } from '../interfaces/IUser';
@@ -37,6 +38,31 @@ router.get(
 router.get(
   '/transaction/:hash',
   eventLogController.getEventByTransactionHash.bind(eventLogController),
+);
+
+// Cold-storage event archiving routes
+router.post(
+  '/archives/run',
+  requireRole(UserRole.ADMIN),
+  eventArchiveController.runArchive.bind(eventArchiveController),
+);
+
+router.get(
+  '/archives/manifests',
+  requireRole(UserRole.ADMIN, UserRole.ENTERPRISE),
+  eventArchiveController.listManifests.bind(eventArchiveController),
+);
+
+router.get(
+  '/archives/manifests/:id/verify',
+  requireRole(UserRole.ADMIN, UserRole.ENTERPRISE),
+  eventArchiveController.verifyManifest.bind(eventArchiveController),
+);
+
+router.get(
+  '/archives/events',
+  requireRole(UserRole.ADMIN, UserRole.ENTERPRISE),
+  eventArchiveController.getArchivedEvents.bind(eventArchiveController),
 );
 
 export default router;
