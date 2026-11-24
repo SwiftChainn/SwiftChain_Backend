@@ -14,13 +14,18 @@ export enum EscrowStatus {
   RESOLVED = 'resolved',
 }
 
-/** Alias for lock status – kept for backward compatibility. */
+/**
+ * Alias for lock status — kept for backward compatibility. Both `status` and
+ * `lockStatus` are persisted on the schema so the two code paths that evolved
+ * in parallel (lifecycle `status` vs. lock-state `lockStatus`) keep working.
+ */
 export enum EscrowLockStatus {
   PENDING = 'pending',
   LOCKED = 'locked',
   RELEASED = 'released',
   REFUNDED = 'refunded',
   DISPUTED = 'disputed',
+  EXPIRED = 'expired',
 }
 
 /** Escrow states in which funds are actually held by the contract. */
@@ -51,16 +56,22 @@ export interface IEscrow extends Document {
   delivery: Types.ObjectId;
   /** Current escrow lifecycle state. */
   status: EscrowStatus;
+  /** Lock-state alias of `status` (legacy API consumers). */
+  lockStatus: EscrowLockStatus;
   /** Escrowed amount, denominated in `assetCode` units (not stroops). */
   amount: number;
   /** Asset code of the escrowed funds (e.g. `XLM`, `USDC`). */
   assetCode: string;
+  /** Asset code (legacy alias of `assetCode`, e.g. `XLM`, `USDC`). */
+  asset: string;
   /** Issuer account for non‑native assets. */
   assetIssuer?: string;
   /** Soroban contract id (`C...`) holding the funds. */
   contractId?: string;
   /** Stellar account funding the escrow. */
   payerAddress?: string;
+  /** Stellar account funding the escrow (legacy alias of `payerAddress`). */
+  fundedBy?: string;
   /** Stellar account entitled to the funds on release. */
   payeeAddress?: string;
   /** Transaction hash of the successful lock invocation. */
@@ -79,6 +90,8 @@ export interface IEscrow extends Document {
   /** Expiry, flagging and resolution audit fields for the escrow lifecycle. */
   /** Absolute point in time after which the lock is considered stale. */
   expiresAt?: Date;
+  /** When the escrow transitioned to `expired`. */
+  expiredAt?: Date;
   /** When the expiry scan flagged the escrow. */
   flaggedAt?: Date;
   /** Soroban ledger sequence at which the expiry was detected (audit trail). */
@@ -99,7 +112,6 @@ export interface IEscrow extends Document {
   readonly isSettled: boolean;
 }
 
-// Schema definitions
 const EscrowTransactionSchema = new Schema<IEscrowTransaction>(
   {
     hash: { type: String, required: true, trim: true },
@@ -109,6 +121,10 @@ const EscrowTransactionSchema = new Schema<IEscrowTransaction>(
   },
   { _id: false },
 );
+
+// Shared defaults/validation for both lifecycle status fields.
+const LOCK_STATUS_VALUES = Object.values(EscrowLockStatus);
+const STATUS_VALUES = Object.values(EscrowStatus);
 
 const EscrowSchema = new Schema<IEscrow>(
   {
@@ -126,12 +142,19 @@ const EscrowSchema = new Schema<IEscrow>(
       required: true,
       index: true,
     },
+    // Legacy lock-state alias (kept in sync by the service layer).
+    lockStatus: { type: String, enum: LOCK_STATUS_VALUES, default: EscrowLockStatus.PENDING, index: true },
     amount: { type: Number, required: true, min: 0 },
-    assetCode: { type: String, required: true, trim: true, uppercase: true, maxlength: 12 },
+    // Both `assetCode` and its legacy alias `asset` are optional at the schema
+    // level so the legacy (asset/fundedBy/lockStatus) and new
+    // (assetCode/payerAddress/status) write paths can both create escrows.
+    assetCode: { type: String, trim: true, uppercase: true, maxlength: 12 },
+    asset: { type: String, trim: true },
     assetIssuer: { type: String, trim: true },
     // Unique: one on-chain escrow contract backs at most one escrow record.
     contractId: { type: String, trim: true, unique: true, sparse: true },
     payerAddress: { type: String, trim: true },
+    fundedBy: { type: String, trim: true },
     payeeAddress: { type: String, trim: true },
     lockTransactionHash: { type: String, trim: true },
     releaseTransactionHash: { type: String, trim: true },
@@ -142,6 +165,7 @@ const EscrowSchema = new Schema<IEscrow>(
     lastSyncedLedger: { type: Number, min: 0 },
     disputeReason: { type: String, trim: true },
     expiresAt: { type: Date, index: true },
+    expiredAt: { type: Date },
     flaggedAt: { type: Date },
     flaggedLedger: { type: Number, min: 0 },
     resolvedAt: { type: Date },
@@ -166,13 +190,18 @@ const EscrowSchema = new Schema<IEscrow>(
 
 // Virtuals
 EscrowSchema.virtual('isFundsLocked').get(function (this: IEscrow) {
-  return FUNDS_HELD_STATUSES.has(this.status);
+  return FUNDS_HELD_STATUSES.has(this.status) || this.lockStatus === EscrowLockStatus.LOCKED;
 });
 EscrowSchema.virtual('isSettled').get(function (this: IEscrow) {
-  return TERMINAL_STATUSES.has(this.status);
+  return (
+    TERMINAL_STATUSES.has(this.status) ||
+    this.lockStatus === EscrowLockStatus.RELEASED ||
+    this.lockStatus === EscrowLockStatus.REFUNDED
+  );
 });
 
-// Ensure transaction hash uniqueness across escrows
+// A given on-chain transaction hash must only ever be recorded once across
+// all escrows, preventing duplicate ingestion by the indexer.
 EscrowSchema.index({ 'transactions.hash': 1 }, { unique: true, sparse: true });
 
 const Escrow: Model<IEscrow> =

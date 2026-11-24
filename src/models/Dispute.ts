@@ -52,7 +52,7 @@ const DisputeSchema = new Schema<IDispute>(
       required: true,
     },
     description: { type: String, required: true },
-    evidenceUrls: { type: [String], default: () => [] },
+    evidenceUrls: { type: [String], default: (): string[] => [] },
     status: {
       type: String,
       enum: Object.values(DisputeStatus),

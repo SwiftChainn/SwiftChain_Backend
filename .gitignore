@@ -17,8 +17,13 @@ pnpm-debug.log*
 #Scripts
 scripts-issues
 scripts/initialize/create-backend-issues.py
+scripts/initialize/create-backend01-issues.py
+scripts/initialize/create-backend-issues02.py
+scripts/initialize/create-backend-issues03.py
+scripts/initialize/create-backend-issues04.py
 scripts/initialize/create-labels.py
 scripts/initialize/create-swift-smart-contract-issues.py
+
 
 #Context
 .contextSwiftFrontend

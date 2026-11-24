@@ -48,7 +48,7 @@ export function parseXdrEvent(xdrPayload: string): ParsedEvent | null {
   }
 }
 
-function decodeXdrPayload(xdrPayload: string): any {
+function decodeXdrPayload(xdrPayload: string): Record<string, unknown> {
   try {
     const buffer = Buffer.from(xdrPayload, 'base64');
     const decoded = JSON.parse(buffer.toString('utf8'));
@@ -59,35 +59,35 @@ function decodeXdrPayload(xdrPayload: string): any {
   }
 }
 
-function isDeliveryEvent(decoded: any): boolean {
-  return decoded.type === 'delivery' && decoded.deliveryId;
+function isDeliveryEvent(decoded: Record<string, unknown>): boolean {
+  return decoded.type === 'delivery' && !!decoded.deliveryId;
 }
 
-function isEscrowEvent(decoded: any): boolean {
-  return decoded.type === 'escrow' && decoded.escrowId;
+function isEscrowEvent(decoded: Record<string, unknown>): boolean {
+  return decoded.type === 'escrow' && !!decoded.escrowId;
 }
 
-function parseDeliveryEvent(decoded: any): ParsedDelivery {
+function parseDeliveryEvent(decoded: Record<string, unknown>): ParsedDelivery {
   return {
     type: 'delivery',
-    deliveryId: decoded.deliveryId || '',
-    recipient: decoded.recipient || '',
-    amount: decoded.amount || '0',
-    asset: decoded.asset || 'XLM',
-    timestamp: decoded.timestamp || Date.now(),
+    deliveryId: (decoded.deliveryId as string) || '',
+    recipient: (decoded.recipient as string) || '',
+    amount: (decoded.amount as string) || '0',
+    asset: (decoded.asset as string) || 'XLM',
+    timestamp: (decoded.timestamp as number) || Date.now(),
   };
 }
 
-function parseEscrowEvent(decoded: any): ParsedEscrow {
+function parseEscrowEvent(decoded: Record<string, unknown>): ParsedEscrow {
   return {
     type: 'escrow',
-    escrowId: decoded.escrowId || '',
-    client: decoded.client || '',
-    freelancer: decoded.freelancer || '',
-    amount: decoded.amount || '0',
-    asset: decoded.asset || 'XLM',
-    releaseCondition: decoded.releaseCondition || '',
-    timestamp: decoded.timestamp || Date.now(),
+    escrowId: (decoded.escrowId as string) || '',
+    client: (decoded.client as string) || '',
+    freelancer: (decoded.freelancer as string) || '',
+    amount: (decoded.amount as string) || '0',
+    asset: (decoded.asset as string) || 'XLM',
+    releaseCondition: (decoded.releaseCondition as string) || '',
+    timestamp: (decoded.timestamp as number) || Date.now(),
   };
 }
 

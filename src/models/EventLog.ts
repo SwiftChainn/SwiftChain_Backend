@@ -9,6 +9,20 @@ export interface IEventLog {
   contractId?: string;
   eventData: Record<string, unknown>;
   indexedAt?: Date;
+  eventData?: Record<string, unknown>;
+  processedAt: Date | null;
+  status: 'pending' | 'processed' | 'failed';
+  errorMessage?: string | null;
+  /** Retry attempts made after the initial failure (manual and scheduled). */
+  retries: number;
+  /** Error from the most recent failed attempt, initial or retry. */
+  lastError?: string | null;
+  /** When the retry job may next pick this entry up; null when none is scheduled. */
+  nextRetryAt?: Date | null;
+  /** Set once retries are exhausted and the entry is escalated to the DLQ. */
+  deadLetteredAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface IEventLogDocument extends Omit<IEventLog, 'eventType'>, mongoose.Document {
@@ -55,6 +69,75 @@ const EventLogSchema = new mongoose.Schema<IEventLogDocument, IEventLogModel>(
         _doc: IEventLogDocument,
         ret: Record<string, unknown>,
       ): Record<string, unknown> => {
+const EventLogSchema = new Schema<IEventLog, IEventLogModel>(
+  {
+    eventType: {
+      type: String,
+      required: [true, 'Event type is required'],
+      enum: ['delivery', 'escrow', 'dispute', 'reputation', 'milestone'],
+      index: true,
+    },
+    transactionHash: {
+      type: String,
+      required: [true, 'Transaction hash is required'],
+      index: true,
+      trim: true,
+    },
+    ledgerSequence: {
+      type: Number,
+      required: [true, 'Ledger sequence is required'],
+      index: true,
+      min: [0, 'Ledger sequence must be a positive number'],
+    },
+    contractId: {
+      type: String,
+      index: true,
+      trim: true,
+      default: null,
+    },
+    eventData: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    processedAt: {
+      type: Date,
+      default: null,
+    },
+    status: {
+      type: String,
+      required: [true, 'Status is required'],
+      enum: ['pending', 'processed', 'failed'],
+      default: 'pending',
+      index: true,
+    },
+    errorMessage: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    retries: {
+      type: Number,
+      default: 0,
+      min: [0, 'Retries cannot be negative'],
+    },
+    lastError: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    nextRetryAt: {
+      type: Date,
+      default: null,
+    },
+    deadLetteredAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+    toJSON: {
+      transform: (_doc: unknown, ret: Record<string, unknown>): Record<string, unknown> => {
         ret.id = ret._id;
         delete ret._id;
         delete ret.__v;
@@ -68,6 +151,25 @@ EventLogSchema.index(
   { transactionHash: 1, eventType: 1 },
   { unique: true, name: 'idx_event_log_transaction_hash_event_type' },
 );
+// Compound index to prevent duplicate processing
+EventLogSchema.index({ transactionHash: 1, eventType: 1 }, { unique: true });
+
+// Index for efficient querying of unprocessed events
+EventLogSchema.index({ status: 1, createdAt: 1 });
+
+// Index for the retry job: failed entries whose backoff window has elapsed
+EventLogSchema.index({ status: 1, nextRetryAt: 1 });
+
+// Index for ledger sequence range queries
+EventLogSchema.index({ ledgerSequence: 1, eventType: 1 });
+
+// Pre-save middleware to set processedAt if status is processed
+EventLogSchema.pre<IEventLog>('save', function (next) {
+  if (this.status === 'processed' && !this.processedAt) {
+    this.processedAt = new Date();
+  }
+  next();
+});
 
 EventLogSchema.static(
   'recordBatchWithCheckpoint',

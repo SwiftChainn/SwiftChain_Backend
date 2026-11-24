@@ -15,7 +15,7 @@ const fleetSchema = new Schema<IFleet>(
       required: [true, 'Treasury address is required'],
       trim: true,
       validate: {
-        validator: (v: string) => /^G[A-Z0-9]{55}$/.test(v),
+        validator: (v: string): boolean => /^G[A-Z0-9]{55}$/.test(v),
         message: 'Invalid Stellar address format. Must start with G and be 56 characters long.',
       },
     },

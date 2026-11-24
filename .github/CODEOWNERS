@@ -1,0 +1,44 @@
+# SwiftChain Backend — CODEOWNERS
+#
+# Review requirements for security-sensitive / supply-chain-critical paths.
+# Any change to a path listed here REQUIRES a documented owner review before the
+# PR can be merged. This is part of hardening against the 2026 open-source
+# malware campaign that enters repos via contributor branches (auto-run in
+# trusted workspaces, npm lifecycle scripts, and dropped binary/font files).
+
+# ── Editor / dev-container auto-execution surfaces ────────────────────────────
+# These are the primary malware re-arm vectors (opening the repo in VS Code with
+# the folder trusted, or in Cursor, auto-runs code). Require owner review.
+.vscode/**                        @SwiftChainn
+.devcontainer/**                  @SwiftChainn
+
+# ── Package-manager lifecycle scripts ─────────────────────────────────────────
+# 'install'/'preinstall'/'postinstall' run automatically on `npm install`. A
+# malicious hook here is the classic supply-chain attack. Require owner review.
+package.json                      @SwiftChainn
+pnpm-lock.yaml                    @SwiftChainn
+package-lock.json                 @SwiftChainn
+yarn.lock                         @SwiftChainn
+pnpm-workspace.yaml               @SwiftChainn
+
+# ── Binary / font / compiled artifacts ────────────────────────────────────────
+# Known malware is dropped as font/binary files (e.g. fa-solid-*.woff2 / *.eot /
+# *.llf, *.node, *.wasm, dist/setup.js) because their content can't be reviewed.
+# Any addition/change here triggers the CODEOWNERS review requirement.
+*.woff2                           @SwiftChainn
+*.woff                            @SwiftChainn
+*.eot                             @SwiftChainn
+*.ttf                             @SwiftChainn
+*.otf                             @SwiftChainn
+*.llf                             @SwiftChainn
+*.node                            @SwiftChainn
+*.wasm                            @SwiftChainn
+*.dll                             @SwiftChainn
+*.exe                             @SwiftChainn
+*.so                              @SwiftChainn
+dist/setup.js                     @SwiftChainn
+scripts/malware-scan.sh           @SwiftChainn
+.github/workflows/pr-malware-scan.yml @SwiftChainn
+
+# ── CI workflows (can exfiltrate repository secrets) ──────────────────────────
+.github/workflows/**              @SwiftChainn

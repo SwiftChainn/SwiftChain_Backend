@@ -12,8 +12,8 @@ async function updateDeliveryOnChainCreation(
 ): Promise<unknown> {
   const updated = await Delivery.findOneAndUpdate(
     { deliveryId },
-    { contractId },
-    { new: true },
+    { contractId, status: DeliveryStatus.ASSIGNED },
+    { new: true, runValidators: true },
   ).lean();
 
   if (!updated) {
@@ -58,31 +58,40 @@ async function updateDeliveryStatus(deliveryId: string, status: string): Promise
 }
 
 export class DeliveryHandlers {
-  public async processDeliveryCreatedEvent(xdrPayload: string) {
+  public async processDeliveryCreatedEvent(xdrPayload: string): Promise<unknown> {
     try {
-      const nativeData: any = scValToNative(xdr.ScVal.fromXDR(xdrPayload, 'base64'));
-      const deliveryId = nativeData?.delivery_id;
-      const contractId = nativeData?.contract_id;
+      const nativeData = scValToNative(xdr.ScVal.fromXDR(xdrPayload, 'base64')) as Record<
+        string,
+        unknown
+      >;
+      const deliveryId = nativeData?.delivery_id as string | undefined;
+      const contractId = nativeData?.contract_id as string | undefined;
       if (!deliveryId || !contractId) throw new Error('Missing delivery_id or contract_id');
       return await updateDeliveryOnChainCreation(deliveryId, contractId);
-    } catch (error: any) {
-      logger.error(`Error processing delivery_created event: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Error processing delivery_created event: ${errorMessage}`);
       throw error;
     }
   }
 
   public async processDeliveryStatusUpdatedEvent(xdrPayload: string): Promise<unknown> {
     try {
-      const nativeData: any = scValToNative(xdr.ScVal.fromXDR(xdrPayload, 'base64'));
+      const nativeData = scValToNative(xdr.ScVal.fromXDR(xdrPayload, 'base64')) as Record<
+        string,
+        unknown
+      >;
       const deliveryId = nativeData?.delivery_id;
       const status = nativeData?.status;
       if (!deliveryId || !status) throw new Error('Missing delivery_id or status');
       const normalizedStatus = typeof status === 'string' ? status : String(status);
-      return await updateDeliveryStatus(deliveryId, normalizedStatus);
-    } catch (error: any) {
-      logger.error(`Error processing delivery_status_updated event: ${error.message}`);
+      return await updateDeliveryStatus(String(deliveryId), normalizedStatus);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Error processing delivery_status_updated event: ${errorMessage}`);
       throw error;
     }
   }
 }
+
 export const deliveryHandlers = new DeliveryHandlers();

@@ -62,7 +62,7 @@ const createUser = async (
     role: UserRole;
     status: UserStatus;
   }> = {},
-) => {
+): Promise<InstanceType<typeof User>> => {
   return User.create({
     firstName: overrides.firstName ?? 'Test',
     lastName: overrides.lastName ?? 'User',
@@ -82,7 +82,7 @@ const createDispute = async (
     description: string;
     status: DisputeStatus;
   }> = {},
-) => {
+): Promise<InstanceType<typeof Dispute>> => {
   return Dispute.create({
     deliveryId: overrides.deliveryId ?? new mongoose.Types.ObjectId().toString(),
     raisedBy: overrides.raisedBy ?? new mongoose.Types.ObjectId().toString(),
