@@ -88,7 +88,53 @@ describe('config/env schema', () => {
     expect(env.ADMIN_DASHBOARD_CACHE_TTL_SECONDS).toBe(60);
   });
 
-  // ── The repaired schema holds together (issue #213/#214 enablement) ──────
+  // ── Issue #323: INDEXER_POLL_INTERVAL_MS & INDEXER_POLL_JITTER_RATIO ─────
+
+  it('defaults INDEXER_POLL_INTERVAL_MS to 10000 when unset (#323)', async () => {
+    const env = await loadEnv({ INDEXER_POLL_INTERVAL_MS: undefined });
+    expect(env.INDEXER_POLL_INTERVAL_MS).toBe(10000);
+  });
+
+  it('parses a custom INDEXER_POLL_INTERVAL_MS as an integer (#323)', async () => {
+    const env = await loadEnv({ INDEXER_POLL_INTERVAL_MS: '30000' });
+    expect(env.INDEXER_POLL_INTERVAL_MS).toBe(30000);
+  });
+
+  it('falls back to default when INDEXER_POLL_INTERVAL_MS is blank (#323)', async () => {
+    const env = await loadEnv({ INDEXER_POLL_INTERVAL_MS: '' });
+    expect(env.INDEXER_POLL_INTERVAL_MS).toBe(10000);
+  });
+
+  it('rejects INDEXER_POLL_INTERVAL_MS below the minimum of 1000 ms (#323)', async () => {
+    await expect(loadEnv({ INDEXER_POLL_INTERVAL_MS: '500' })).rejects.toThrow(/process.exit called/i);
+  });
+
+  it('rejects INDEXER_POLL_INTERVAL_MS above the maximum of 300000 ms (#323)', async () => {
+    await expect(loadEnv({ INDEXER_POLL_INTERVAL_MS: '999999' })).rejects.toThrow(/process.exit called/i);
+  });
+
+  it('defaults INDEXER_POLL_JITTER_RATIO to 0.2 when unset (#323)', async () => {
+    const env = await loadEnv({ INDEXER_POLL_JITTER_RATIO: undefined });
+    expect(env.INDEXER_POLL_JITTER_RATIO).toBe(0.2);
+  });
+
+  it('parses a custom INDEXER_POLL_JITTER_RATIO as a float (#323)', async () => {
+    const env = await loadEnv({ INDEXER_POLL_JITTER_RATIO: '0.5' });
+    expect(env.INDEXER_POLL_JITTER_RATIO).toBe(0.5);
+  });
+
+  it('falls back to default when INDEXER_POLL_JITTER_RATIO is blank (#323)', async () => {
+    const env = await loadEnv({ INDEXER_POLL_JITTER_RATIO: '' });
+    expect(env.INDEXER_POLL_JITTER_RATIO).toBe(0.2);
+  });
+
+  it('rejects INDEXER_POLL_JITTER_RATIO below 0 (#323)', async () => {
+    await expect(loadEnv({ INDEXER_POLL_JITTER_RATIO: '-0.1' })).rejects.toThrow(/process.exit called/i);
+  });
+
+  it('rejects INDEXER_POLL_JITTER_RATIO above 0.5 (#323)', async () => {
+    await expect(loadEnv({ INDEXER_POLL_JITTER_RATIO: '0.6' })).rejects.toThrow(/process.exit called/i);
+  });
 
   it('exposes exactly one canonical entry for every previously duplicated key', async () => {
     const env = await loadEnv({});
@@ -100,6 +146,8 @@ describe('config/env schema', () => {
     expect(env.ETA_CACHE_TTL_SECONDS).toBe(600);
     expect(env.ETA_GEOHASH_PRECISION).toBe(7);
   });
+
+  // ── The repaired schema holds together (issue #213/#214 enablement) ──────
 
   it('still validates the rest of the schema alongside the new keys', async () => {
     const env = await loadEnv({});

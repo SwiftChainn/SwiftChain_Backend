@@ -12,7 +12,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
 import EventLog from '../src/models/EventLog';
 import { IndexerStatus } from '../src/models/IndexerStatus';
-import { EventPoller, EventSubscription } from '../src/services/eventPoller';
+import { EventPoller, EventSubscription, computeJitteredInterval } from '../src/services/eventPoller';
 import type {
   ISorobanRpcClient,
   SorobanGetEventsRequest,
@@ -116,6 +116,7 @@ const createPoller = (
   rpc: ISorobanRpcClient,
   handle: EventSubscription['handle'],
   pageSize = 100,
+  jitterRatio?: number,
 ): EventPoller =>
   new EventPoller({
     rpc,
@@ -123,6 +124,7 @@ const createPoller = (
     contractId: CONTRACT_ID,
     subscriptions: [subscriptionFor(handle)],
     intervalMs: 60_000,
+    jitterRatio,
     pageSize,
   });
 
@@ -361,6 +363,68 @@ describe('EventPoller', () => {
       poller.stop();
       await flush();
       expect(getLatestLedger).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ─── Jitter ───────────────────────────────────────────────────────────────
+
+  describe('computeJitteredInterval', () => {
+    it('returns exactly baseMs when ratio is 0 (no jitter)', () => {
+      for (let i = 0; i < 20; i++) {
+        expect(computeJitteredInterval(10_000, 0)).toBe(10_000);
+      }
+    });
+
+    it('returns a value within [base*(1-ratio), base*(1+ratio)] for ratio 0.2', () => {
+      const base = 10_000;
+      const ratio = 0.2;
+      const lo = base * (1 - ratio);
+      const hi = base * (1 + ratio);
+      for (let i = 0; i < 100; i++) {
+        const result = computeJitteredInterval(base, ratio);
+        expect(result).toBeGreaterThanOrEqual(lo);
+        expect(result).toBeLessThanOrEqual(hi);
+      }
+    });
+
+    it('returns a value within [base*(1-ratio), base*(1+ratio)] for ratio 0.5 (maximum allowed)', () => {
+      const base = 30_000;
+      const ratio = 0.5;
+      const lo = base * (1 - ratio); // 15_000
+      const hi = base * (1 + ratio); // 45_000
+      for (let i = 0; i < 100; i++) {
+        const result = computeJitteredInterval(base, ratio);
+        expect(result).toBeGreaterThanOrEqual(lo);
+        expect(result).toBeLessThanOrEqual(hi);
+      }
+    });
+
+    it('clamps a ratio above 0.5 to 0.5', () => {
+      const base = 10_000;
+      const lo = base * 0.5; // 5_000
+      const hi = base * 1.5; // 15_000
+      for (let i = 0; i < 50; i++) {
+        const result = computeJitteredInterval(base, 0.9);
+        expect(result).toBeGreaterThanOrEqual(lo);
+        expect(result).toBeLessThanOrEqual(hi);
+      }
+    });
+
+    it('clamps a negative ratio to 0 (no jitter)', () => {
+      for (let i = 0; i < 20; i++) {
+        expect(computeJitteredInterval(5_000, -0.3)).toBe(5_000);
+      }
+    });
+
+    it('produces varied values across multiple calls (randomness check)', () => {
+      const base = 10_000;
+      const results = new Set<number>();
+      for (let i = 0; i < 50; i++) {
+        results.add(computeJitteredInterval(base, 0.2));
+      }
+      // With a ±2000 ms window and 50 samples, the probability all land on the
+      // same rounded millisecond is negligible.
+      expect(results.size).toBeGreaterThan(1);
     });
   });
 });
