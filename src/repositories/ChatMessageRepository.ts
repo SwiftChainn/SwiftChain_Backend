@@ -18,7 +18,7 @@ export class ChatMessageRepository extends BaseRepository<IChatMessage> {
    * @param limit - Maximum number of messages to return.
    */
   async findRecent(limit: number): Promise<IChatMessage[]> {
-    return this.find({}, { sort: { createdAt: -1 }, limit, lean: true });
+    return this.find({}, { sort: { createdAt: -1, _id: -1 }, limit, lean: true });
   }
 
   /**
