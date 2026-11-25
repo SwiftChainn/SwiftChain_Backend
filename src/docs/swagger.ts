@@ -41,6 +41,7 @@ const swaggerDefinition: swaggerJSDoc.SwaggerDefinition = {
     },
   ],
   tags: [
+    { name: 'Onboarding', description: 'Merchant registration and treasury verification' },
     { name: 'Auth', description: 'User registration and authentication' },
     { name: 'Deliveries', description: 'Delivery creation, lifecycle, and archival' },
     { name: 'Delivery Status', description: 'Driver-facing delivery status transitions' },
@@ -127,6 +128,8 @@ const annotatedRouteFiles = [
   'escrowIndexer.routes',
   'indexer.routes',
   'healthRoutes',
+  'metricsRoutes',
+  'onboardingRoutes',
   'socketMetricsRoutes',
   'transactionRoutes',
 ];

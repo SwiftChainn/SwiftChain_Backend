@@ -1855,6 +1855,172 @@ export const paths: swaggerJSDoc.Paths = {
       },
     },
   },
+  '/v1/admin/explorer/transactions/{hash}': {
+    get: {
+      tags: ['Admin'],
+      summary: 'Find events and entities correlated with a transaction',
+      security: bearer,
+      parameters: [
+        {
+          name: 'hash',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Find events and entities correlated with a transaction',
+        },
+        '401': {
+          description: 'Authentication required',
+        },
+        '403': {
+          description: 'Insufficient role',
+        },
+      },
+    },
+  },
+  '/v1/admin/explorer/ledgers': {
+    get: {
+      tags: ['Admin'],
+      summary: 'Find event and entity correlations in a ledger range',
+      security: bearer,
+      parameters: [
+        {
+          name: 'startLedger',
+          in: 'query',
+          required: true,
+          schema: {
+            type: 'integer',
+          },
+        },
+        {
+          name: 'endLedger',
+          in: 'query',
+          required: true,
+          schema: {
+            type: 'integer',
+          },
+        },
+        {
+          name: 'eventType',
+          in: 'query',
+          required: false,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Find event and entity correlations in a ledger range',
+        },
+        '401': {
+          description: 'Authentication required',
+        },
+        '403': {
+          description: 'Insufficient role',
+        },
+      },
+    },
+  },
+  '/v1/admin/explorer/entities/{entityType}/{entityId}': {
+    get: {
+      tags: ['Admin'],
+      summary: 'Find events that changed an entity',
+      security: bearer,
+      parameters: [
+        {
+          name: 'entityType',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+        {
+          name: 'entityId',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Find events that changed an entity',
+        },
+        '401': {
+          description: 'Authentication required',
+        },
+        '403': {
+          description: 'Insufficient role',
+        },
+      },
+    },
+  },
+  '/v1/eventlog/transaction/{hash}/correlations': {
+    get: {
+      tags: ['Indexer'],
+      summary: 'Look up entity correlations for a transaction',
+      security: bearer,
+      parameters: [
+        {
+          name: 'hash',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Look up entity correlations for a transaction',
+        },
+        '401': {
+          description: 'Authentication required',
+        },
+      },
+    },
+  },
+  '/v1/eventlog/entity/{entityType}/{entityId}': {
+    get: {
+      tags: ['Indexer'],
+      summary: 'Look up on-chain events for an entity',
+      security: bearer,
+      parameters: [
+        {
+          name: 'entityType',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+        {
+          name: 'entityId',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Look up on-chain events for an entity',
+        },
+        '401': {
+          description: 'Authentication required',
+        },
+      },
+    },
+  },
   '/v1/eventlog/transaction/{hash}': {
     get: {
       tags: ['Indexer'],
