@@ -12,6 +12,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
 import EventLog from '../src/models/EventLog';
 import { IndexerStatus } from '../src/models/IndexerStatus';
+import logger from '../src/config/logger';
 import { EventPoller, EventSubscription } from '../src/services/eventPoller';
 import type {
   ISorobanRpcClient,
@@ -345,6 +346,120 @@ describe('EventPoller', () => {
       expect((await EventLog.findOne({ transactionHash: 'tx-1' }).lean())?.status).toBe(
         'processed',
       );
+    });
+  });
+
+  describe('structured logging', () => {
+    /** Every log line recorded at `level` whose message matches. */
+    const logLines = (
+      level: 'info' | 'warn' | 'error' | 'debug',
+      message: string,
+    ): Array<Record<string, unknown>> =>
+      (logger[level] as unknown as jest.Mock).mock.calls
+        .filter(([logged]) => logged === message)
+        .map(([, meta]) => meta as Record<string, unknown>);
+
+    /** An escrow event whose second topic carries the delivery id, as the contract emits it. */
+    const keyedEvent = (
+      ledger: number,
+      txHash: string,
+      deliveryId: number,
+    ): StellarRpc.Api.EventResponse => {
+      const event = buildEvent({ ledger, txHash });
+      event.topic.push(xdr.ScVal.scvU64(xdr.Uint64.fromString(String(deliveryId))));
+      return event;
+    };
+
+    it('attaches ledger, event type, contract and entity to a handler failure', async () => {
+      await setCheckpoint(100);
+      const { rpc } = createFakeRpc(105, [keyedEvent(101, 'tx-1', 42)]);
+
+      await createPoller(
+        rpc,
+        jest.fn().mockRejectedValue(new Error('settlement rejected')),
+      ).pollOnce();
+
+      expect(logLines('error', '[EventPoller] Handler failed')).toEqual([
+        expect.objectContaining({
+          ledgerSeq: 101,
+          eventType: 'escrow',
+          contractId: CONTRACT_ID,
+          entityId: '42',
+          transactionHash: 'tx-1',
+          error: 'settlement rejected',
+        }),
+      ]);
+    });
+
+    it('logs dispatch and dedupe skips at debug with the event context', async () => {
+      await setCheckpoint(100);
+      const { rpc } = createFakeRpc(105, [keyedEvent(101, 'tx-1', 7)]);
+      const poller = createPoller(rpc, jest.fn().mockResolvedValue(undefined));
+
+      await poller.pollOnce();
+      await setCheckpoint(100);
+      await poller.pollOnce();
+
+      const context = {
+        ledgerSeq: 101,
+        eventType: 'escrow',
+        contractId: CONTRACT_ID,
+        entityId: '7',
+      };
+      expect(logLines('debug', '[EventPoller] Dispatching event to handler')).toEqual([
+        expect.objectContaining(context),
+      ]);
+      expect(logLines('debug', '[EventPoller] Duplicate event skipped')).toEqual([
+        expect.objectContaining({ ...context, recordedStatus: 'processed' }),
+      ]);
+      expect(logger.info).not.toHaveBeenCalledWith(
+        '[EventPoller] Event processed',
+        expect.anything(),
+      );
+    });
+
+    it('logs the checkpoint advance with the ledger synced to', async () => {
+      await setCheckpoint(100);
+      const { rpc } = createFakeRpc(105, [buildEvent({ ledger: 101 })]);
+
+      await createPoller(rpc, jest.fn().mockResolvedValue(undefined)).pollOnce();
+
+      expect(logLines('debug', '[EventPoller] Checkpoint advanced')).toEqual([
+        {
+          ledgerSeq: 105,
+          eventType: null,
+          contractId: CONTRACT_ID,
+          entityId: null,
+          network: NETWORK,
+          previousLedger: 100,
+        },
+      ]);
+      expect(logLines('info', '[EventPoller] Cycle complete')).toEqual([
+        expect.objectContaining({ ledgerSeq: 105, fetched: 1, processed: 1, failed: 0 }),
+      ]);
+    });
+
+    it('keeps idle cycles at debug so polling does not flood the info log', async () => {
+      await setCheckpoint(100);
+      const { rpc } = createFakeRpc(105, []);
+
+      await createPoller(rpc, jest.fn()).pollOnce();
+
+      expect(logLines('info', '[EventPoller] Cycle complete')).toHaveLength(0);
+      expect(logLines('debug', '[EventPoller] Cycle complete')).toEqual([
+        expect.objectContaining({ ledgerSeq: 105, contractId: CONTRACT_ID, fetched: 0 }),
+      ]);
+    });
+
+    it('logs an event without an entity topic with a null entityId', async () => {
+      await setCheckpoint(100);
+      const { rpc } = createFakeRpc(105, [buildEvent({ ledger: 101, txHash: 'tx-1' })]);
+
+      await createPoller(rpc, jest.fn().mockRejectedValue(new Error('boom'))).pollOnce();
+
+      expect(logLines('error', '[EventPoller] Handler failed')).toEqual([
+        expect.objectContaining({ ledgerSeq: 101, entityId: null }),
+      ]);
     });
   });
 
