@@ -124,7 +124,6 @@ const EscrowTransactionSchema = new Schema<IEscrowTransaction>(
 
 // Shared defaults/validation for both lifecycle status fields.
 const LOCK_STATUS_VALUES = Object.values(EscrowLockStatus);
-const STATUS_VALUES = Object.values(EscrowStatus);
 
 const EscrowSchema = new Schema<IEscrow>(
   {
@@ -143,7 +142,12 @@ const EscrowSchema = new Schema<IEscrow>(
       index: true,
     },
     // Legacy lock-state alias (kept in sync by the service layer).
-    lockStatus: { type: String, enum: LOCK_STATUS_VALUES, default: EscrowLockStatus.PENDING, index: true },
+    lockStatus: {
+      type: String,
+      enum: LOCK_STATUS_VALUES,
+      default: EscrowLockStatus.PENDING,
+      index: true,
+    },
     amount: { type: Number, required: true, min: 0 },
     // Both `assetCode` and its legacy alias `asset` are optional at the schema
     // level so the legacy (asset/fundedBy/lockStatus) and new

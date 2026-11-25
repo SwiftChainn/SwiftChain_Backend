@@ -185,7 +185,9 @@ describe('AdminDriverSearchService', () => {
         ],
       }),
     };
-    const service = new AdminDriverSearchService(fakeRepository as unknown as AdminDriverRepository);
+    const service = new AdminDriverSearchService(
+      fakeRepository as unknown as AdminDriverRepository,
+    );
 
     const result = await service.search(options({}, 2, 10));
 

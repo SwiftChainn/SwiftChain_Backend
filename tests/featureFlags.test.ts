@@ -1,7 +1,4 @@
-import {
-  FEATURE_FLAG_DEFAULTS,
-  parseFeatureFlags,
-} from '../src/config/flags';
+import { FEATURE_FLAG_DEFAULTS, parseFeatureFlags } from '../src/config/flags';
 
 describe('feature flag configuration', () => {
   it('preserves existing optional behavior by default and leaves milestones disabled', () => {
