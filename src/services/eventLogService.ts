@@ -27,6 +27,39 @@ export class EventLogService {
   }
 
   /**
+   * Idempotently record an event log entry using its content-addressed
+   * `eventHash` (and legacy `{transactionHash, eventType}` fallback).
+   * On collision, returns the existing record instead of throwing (#336).
+   */
+  async recordEventIdempotent(
+    eventData: Partial<IEventLog>,
+  ): Promise<{ event: IEventLog; replayed: boolean }> {
+    const result = await EventLog.recordOrReplay(eventData);
+    if (result.replayed) {
+      logger.info(
+        `Event log replay detected (idempotent): ${result.event.id} for transaction ${result.event.transactionHash}`,
+      );
+    } else {
+      logger.info(
+        `Event log created: ${result.event.id} for transaction ${result.event.transactionHash}`,
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Look up an event log entry by its content-addressed eventHash (#336).
+   */
+  async getEventByHash(eventHash: string): Promise<IEventLog | null> {
+    try {
+      return await EventLog.findByEventHash(eventHash);
+    } catch (error) {
+      logger.error('Error fetching event by hash:', error);
+      return null;
+    }
+  }
+
+  /**
    * Mark an event as processed
    */
   async markAsProcessed(transactionHash: string, eventType: string): Promise<IEventLog | null> {

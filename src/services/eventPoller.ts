@@ -27,7 +27,9 @@ import { escrowIndexerConfig } from '../config/escrow';
 import env from '../config/env';
 import logger from '../config/logger';
 import { nextEventLogRetryAt } from '../utils/eventLogBackoff';
+import { computeEventHashFromRpcEvent } from '../utils/eventHash';
 import { handleEscrowFundedEvent } from '../indexer/escrowHandlers';
+import { eventCorrelationService, extractEntityFromRpcEvent } from './eventCorrelationService';
 import type { ISorobanRpcClient, SorobanGetEventsRequest } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
 
@@ -86,15 +88,9 @@ export interface EventReplayer {
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const DEFAULT_PAGE_SIZE = 100;
-const DUPLICATE_KEY_ERROR_CODE = 11000;
 
 /** Topic filter key as the RPC node expects it: the base64 XDR of the symbol. */
 const topicKey = (topic: string): string => xdr.ScVal.scvSymbol(topic).toXDR('base64');
-
-const isDuplicateKeyError = (error: unknown): boolean =>
-  typeof error === 'object' &&
-  error !== null &&
-  (error as { code?: number }).code === DUPLICATE_KEY_ERROR_CODE;
 
 // ─── Poller ────────────────────────────────────────────────────────────────────
 
@@ -270,35 +266,49 @@ export class EventPoller implements EventReplayer {
   ): Promise<EventOutcome> {
     const { eventType, handle } = subscription;
     const transactionHash = event.txHash;
+    const eventHash = computeEventHashFromRpcEvent(event, this.options.contractId);
 
-    const existing = await EventLog.findOne({ transactionHash, eventType }).lean();
-    if (existing && existing.status !== 'pending') return 'duplicates';
+    const { event: record, replayed } = await EventLog.recordOrReplay({
+      eventType,
+      transactionHash,
+      ledgerSequence: event.ledger,
+      contractId: this.options.contractId,
+      eventHash,
+      eventData: { eventId: event.id, ledgerClosedAt: event.ledgerClosedAt },
+      status: 'pending',
+    });
 
-    if (!existing) {
-      try {
-        await EventLog.create({
-          eventType,
-          transactionHash,
-          ledgerSequence: event.ledger,
-          contractId: this.options.contractId,
-          eventData: { eventId: event.id, ledgerClosedAt: event.ledgerClosedAt },
-          status: 'pending',
-        });
-      } catch (error) {
-        // A concurrent writer recorded the same event between our read and write.
-        if (isDuplicateKeyError(error)) return 'duplicates';
-        throw error;
-      }
-    }
+    if (replayed && record.status !== 'pending') return 'duplicates';
 
     try {
       await handle(event);
-      await EventLog.markAsProcessed(transactionHash, eventType);
+      await EventLog.updateOne(
+        { _id: record._id },
+        { $set: { status: 'processed', processedAt: new Date(), eventHash } },
+      );
+
+      // Populate the event correlation index for tx/ledger -> off-chain entity lookups (#334).
+      const target = extractEntityFromRpcEvent(eventType, event);
+      if (target) {
+        await eventCorrelationService.recordCorrelation({
+          contractId: this.options.contractId,
+          transactionHash,
+          ledgerSequence: event.ledger,
+          eventType,
+          eventHash,
+          eventLogId: record._id,
+          topic: target.topic ?? subscription.topic,
+          entityType: target.entityType,
+          entityId: target.entityId,
+          metadata: { eventId: event.id, ledgerClosedAt: event.ledgerClosedAt },
+        });
+      }
+
       return 'processed';
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await EventLog.updateOne(
-        { transactionHash, eventType },
+        { _id: record._id },
         {
           status: 'failed',
           errorMessage,

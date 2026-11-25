@@ -2,7 +2,12 @@ import { assertLockContractAsset } from './currencyService';
 import {
   Account,
   Address,
+  Asset,
   Contract,
+  Keypair,
+  Memo,
+  Operation,
+  StrKey,
   Transaction,
   TransactionBuilder,
   nativeToScVal,
@@ -287,3 +292,247 @@ export class TransactionService {
 
 /** Singleton instance used by the controller layer. */
 export const transactionService = new TransactionService();
+
+// ─── EscrowTransactionBuilder (#333) ───────────────────────────────────────────
+
+export interface EscrowAssetSpec {
+  code: string;
+  issuer?: string;
+}
+
+export interface EscrowPaymentBuildInput {
+  sourceAccount: string;
+  sequence: string;
+  destination: string;
+  /** Amount in stroops (integer bigint or numeric string) or decimal XLM/asset amount. */
+  amountStroops: bigint | number | string;
+  asset?: EscrowAssetSpec;
+  memo?: string;
+  fee?: string;
+  timeoutSeconds?: number;
+  networkPassphrase?: string;
+}
+
+export interface SequenceRetryResult<T> {
+  result: T;
+  attempts: number;
+  finalSequence: string;
+}
+
+/**
+ * Pure, deterministic Stellar transaction builder for escrow lifecycle
+ * operations (`buildFund`, `buildRelease`, `buildRefund`), signature assembly
+ * & verification, and `tx_bad_seq` retry handling (#333).
+ */
+export class EscrowTransactionBuilder {
+  private readonly networkPassphrase: string;
+  private readonly defaultFee: string;
+  private readonly defaultTimeoutSeconds: number;
+
+  constructor(options?: { networkPassphrase?: string; baseFee?: string; timeoutSeconds?: number }) {
+    this.networkPassphrase = options?.networkPassphrase ?? stellarConfig.networkPassphrase;
+    this.defaultFee = options?.baseFee ?? stellarConfig.baseFee;
+    this.defaultTimeoutSeconds = options?.timeoutSeconds ?? stellarConfig.transactionTimeoutSeconds;
+  }
+
+  /** Build a funding transaction from payer to escrow account. */
+  public buildFund(input: EscrowPaymentBuildInput): Transaction {
+    return this.buildPaymentTx(input, 'escrow_fund');
+  }
+
+  /** Build a release transaction from escrow account to recipient/driver. */
+  public buildRelease(input: EscrowPaymentBuildInput): Transaction {
+    return this.buildPaymentTx(input, 'escrow_release');
+  }
+
+  /** Build a refund transaction from escrow account back to payer/merchant. */
+  public buildRefund(input: EscrowPaymentBuildInput): Transaction {
+    return this.buildPaymentTx(input, 'escrow_refund');
+  }
+
+  /**
+   * Assemble signatures onto a transaction envelope using the supplied signers.
+   * Rejects empty signer lists, invalid signers, or network-passphrase mismatches.
+   */
+  public signTransaction(
+    transaction: Transaction,
+    signers: Keypair[],
+    expectedPassphrase?: string,
+  ): Transaction {
+    const passphrase = expectedPassphrase ?? this.networkPassphrase;
+    if (transaction.networkPassphrase !== passphrase) {
+      throw new AppError(
+        `Network passphrase mismatch: expected '${passphrase}', got '${transaction.networkPassphrase}'.`,
+        StatusCodes.BAD_REQUEST,
+      );
+    }
+
+    if (!Array.isArray(signers) || signers.length === 0) {
+      throw new AppError('At least one signer keypair is required.', StatusCodes.BAD_REQUEST);
+    }
+
+    for (const signer of signers) {
+      if (
+        !signer ||
+        typeof signer.publicKey !== 'function' ||
+        typeof signer.canSign !== 'function' ||
+        !signer.canSign() ||
+        !StrKey.isValidEd25519PublicKey(signer.publicKey())
+      ) {
+        throw new AppError('Invalid signer keypair provided.', StatusCodes.BAD_REQUEST);
+      }
+    }
+
+    transaction.sign(...signers);
+    return transaction;
+  }
+
+  /**
+   * Verify that a signed transaction envelope carries a valid Ed25519 signature
+   * matching `publicKey` over the transaction hash.
+   */
+  public verifySignature(transaction: Transaction, publicKey: string): boolean {
+    if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+      throw new AppError('Invalid signer public key.', StatusCodes.BAD_REQUEST);
+    }
+    if (transaction.networkPassphrase !== this.networkPassphrase) {
+      throw new AppError(
+        `Network passphrase mismatch: expected '${this.networkPassphrase}', got '${transaction.networkPassphrase}'.`,
+        StatusCodes.BAD_REQUEST,
+      );
+    }
+
+    const keypair = Keypair.fromPublicKey(publicKey);
+    const txHash = transaction.hash();
+    const expectedHint = keypair.signatureHint();
+
+    return transaction.signatures.some((sig) => {
+      if (!Buffer.from(sig.hint()).equals(Buffer.from(expectedHint))) {
+        return false;
+      }
+      return keypair.verify(txHash, sig.signature());
+    });
+  }
+
+  /**
+   * Execute a transaction submission with automatic rebuild on `tx_bad_seq`.
+   * Fetches a fresh sequence number via `fetchFreshSequence` and rebuilds the
+   * transaction before retrying.
+   */
+  public async submitWithSequenceRetry<T>(params: {
+    initialSequence: string;
+    build: (sequence: string) => Transaction;
+    submit: (tx: Transaction) => Promise<T>;
+    fetchFreshSequence: () => Promise<string>;
+    maxRetries?: number;
+  }): Promise<SequenceRetryResult<T>> {
+    const maxRetries = Math.max(0, params.maxRetries ?? 2);
+    let currentSequence = params.initialSequence;
+    let attempts = 0;
+
+    for (;;) {
+      attempts += 1;
+      const tx = params.build(currentSequence);
+      try {
+        const result = await params.submit(tx);
+        return { result, attempts, finalSequence: currentSequence };
+      } catch (error: unknown) {
+        const isBadSeq = this.isBadSequenceError(error);
+        if (!isBadSeq || attempts > maxRetries) {
+          throw error;
+        }
+        currentSequence = await params.fetchFreshSequence();
+      }
+    }
+  }
+
+  // ── Private helpers ────────────────────────────────────────────────────────
+
+  private buildPaymentTx(input: EscrowPaymentBuildInput, defaultMemo: string): Transaction {
+    const passphrase = input.networkPassphrase ?? this.networkPassphrase;
+    if (passphrase !== this.networkPassphrase) {
+      throw new AppError(
+        `Mismatched network passphrase: expected '${this.networkPassphrase}', got '${passphrase}'.`,
+        StatusCodes.BAD_REQUEST,
+      );
+    }
+
+    if (!StrKey.isValidEd25519PublicKey(input.sourceAccount)) {
+      throw new AppError('Invalid source account public key.', StatusCodes.BAD_REQUEST);
+    }
+    if (!StrKey.isValidEd25519PublicKey(input.destination)) {
+      throw new AppError('Invalid destination public key.', StatusCodes.BAD_REQUEST);
+    }
+    if (!/^\d+$/.test(String(input.sequence).trim())) {
+      throw new AppError('Invalid sequence number.', StatusCodes.BAD_REQUEST);
+    }
+
+    const stroops = this.parsePositiveStroops(input.amountStroops);
+    const amountDecimal = fromStroops(stroops);
+    const asset = this.resolveAsset(input.asset);
+
+    const account = new Account(input.sourceAccount, String(input.sequence).trim());
+    const builder = new TransactionBuilder(account, {
+      fee: input.fee ?? this.defaultFee,
+      networkPassphrase: passphrase,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: input.destination,
+          asset,
+          amount: amountDecimal,
+        }),
+      )
+      .addMemo(Memo.text((input.memo ?? defaultMemo).slice(0, 28)))
+      .setTimeout(input.timeoutSeconds ?? this.defaultTimeoutSeconds);
+
+    return builder.build();
+  }
+
+  private parsePositiveStroops(raw: bigint | number | string): bigint {
+    let stroops: bigint;
+    if (typeof raw === 'bigint') {
+      stroops = raw;
+    } else if (typeof raw === 'number') {
+      if (!Number.isFinite(raw) || !Number.isInteger(raw)) {
+        throw new AppError('Amount in stroops must be a finite integer.', StatusCodes.BAD_REQUEST);
+      }
+      stroops = BigInt(raw);
+    } else {
+      const trimmed = raw.trim();
+      if (!/^-?\d+$/.test(trimmed)) {
+        throw new AppError('Amount in stroops must be an integer string.', StatusCodes.BAD_REQUEST);
+      }
+      stroops = BigInt(trimmed);
+    }
+
+    if (stroops <= 0n) {
+      throw new AppError('Transaction amount must be positive.', StatusCodes.BAD_REQUEST);
+    }
+    return stroops;
+  }
+
+  private resolveAsset(spec?: EscrowAssetSpec): Asset {
+    if (!spec || spec.code.toUpperCase() === 'XLM' || spec.code.toLowerCase() === 'native') {
+      return Asset.native();
+    }
+    if (!spec.issuer || !StrKey.isValidEd25519PublicKey(spec.issuer)) {
+      throw new AppError(
+        `Issued asset '${spec.code}' requires a valid Stellar issuer public key.`,
+        StatusCodes.BAD_REQUEST,
+      );
+    }
+    return new Asset(spec.code, spec.issuer);
+  }
+
+  private isBadSequenceError(error: unknown): boolean {
+    const message = extractMessage(error).toLowerCase();
+    if (message.includes('tx_bad_seq')) return true;
+    if (typeof error === 'object' && error !== null) {
+      const errObj = error as { resultCodes?: { transaction?: string }; code?: string };
+      if (errObj.resultCodes?.transaction === 'tx_bad_seq') return true;
+      if (errObj.code === 'tx_bad_seq') return true;
+    }
+    return false;
+  }
+}

@@ -106,8 +106,6 @@ router.use(requireRole(UserRole.ADMIN));
  */
 router.get('/drivers', buildQueryOptions(adminDriverQueryConfig), searchAdminDrivers);
 
-
-
 /**
  * @openapi
  * /v1/admin/dashboard:
@@ -433,5 +431,19 @@ router.get('/eventlog/failed', eventLogController.getFailedEvents.bind(eventLogC
  *         description: No escrow contract is configured to replay against
  */
 router.post('/eventlog/:id/retry', eventLogController.retryFailedEvent.bind(eventLogController));
+
+// Admin explorer correlation APIs (#334)
+router.get(
+  '/explorer/transactions/:hash',
+  eventLogController.getCorrelationsByTx.bind(eventLogController),
+);
+router.get(
+  '/explorer/ledgers',
+  eventLogController.getCorrelationsByLedgerRange.bind(eventLogController),
+);
+router.get(
+  '/explorer/entities/:entityType/:entityId',
+  eventLogController.getEventsForEntity.bind(eventLogController),
+);
 
 export default router;

@@ -39,4 +39,16 @@ router.get(
   eventLogController.getEventByTransactionHash.bind(eventLogController),
 );
 
+// Get correlated off-chain entities and events for a transaction hash (#334)
+router.get(
+  '/transaction/:hash/correlations',
+  eventLogController.getCorrelationsByTx.bind(eventLogController),
+);
+
+// Get all on-chain events that mutated a specific off-chain entity (#334)
+router.get(
+  '/entity/:entityType/:entityId',
+  eventLogController.getEventsForEntity.bind(eventLogController),
+);
+
 export default router;
