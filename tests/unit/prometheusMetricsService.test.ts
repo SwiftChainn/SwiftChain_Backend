@@ -48,7 +48,8 @@ import mongoose from 'mongoose';
 import { redisClient } from '../../src/config/redis';
 import { getIndexerLagSnapshot } from '../../src/services/monitorService';
 
-const mongoConnection = (mongoose as unknown as { connection: { getClient: jest.Mock } }).connection;
+const mongoConnection = (mongoose as unknown as { connection: { getClient: jest.Mock } })
+  .connection;
 const redis = redisClient as unknown as { status: string; ping: jest.Mock };
 const indexerLagSnapshot = getIndexerLagSnapshot as jest.Mock;
 
@@ -129,7 +130,9 @@ describe('PrometheusMetricsService', () => {
     expect(output).toContain('swiftchain_mongodb_pool_stats_available 0');
     expect(output).toContain('swiftchain_redis_healthy 0');
     expect(output).toContain('swiftchain_indexer_lag_available 0');
-    expect(output.split('\n').some((line) => line.startsWith('swiftchain_indexer_lag_ledgers '))).toBe(false);
+    expect(
+      output.split('\n').some((line) => line.startsWith('swiftchain_indexer_lag_ledgers ')),
+    ).toBe(false);
   });
 
   it('handles Redis and indexer probe errors without breaking exposition output', async () => {

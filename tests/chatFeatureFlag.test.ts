@@ -2,10 +2,7 @@ jest.mock('../src/config/flags', () => ({
   isEnabled: (flag: string) => flag !== 'chat',
 }));
 
-import {
-  ChatFeatureDisabledError,
-  ChatMessageService,
-} from '../src/sockets/chatMessage.service';
+import { ChatFeatureDisabledError, ChatMessageService } from '../src/sockets/chatMessage.service';
 import type { ChatMessageRepository } from '../src/repositories/ChatMessageRepository';
 
 describe('chat feature flag', () => {

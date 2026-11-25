@@ -34,23 +34,25 @@ const safeMetricLabel = (value: string): string =>
 const readMongoPoolSnapshot = (): MongoPoolSnapshot => {
   try {
     const connection = mongoose.connection;
-    const topology = (connection.getClient() as unknown as {
-      topology?: {
-        s?: {
-          servers?: Map<
-            string,
-            {
-              s?: {
-                pool?: {
-                  totalConnectionCount?: number;
-                  availableConnectionCount?: number;
+    const topology = (
+      connection.getClient() as unknown as {
+        topology?: {
+          s?: {
+            servers?: Map<
+              string,
+              {
+                s?: {
+                  pool?: {
+                    totalConnectionCount?: number;
+                    availableConnectionCount?: number;
+                  };
                 };
-              };
-            }
-          >;
+              }
+            >;
+          };
         };
-      };
-    }).topology;
+      }
+    ).topology;
 
     const servers = topology?.s?.servers;
     if (!servers || typeof servers.values !== 'function') {
@@ -174,11 +176,7 @@ class PrometheusMetricsService {
       );
     }
 
-    gauge(
-      'swiftchain_process_uptime_seconds',
-      'Process uptime in seconds.',
-      process.uptime(),
-    );
+    gauge('swiftchain_process_uptime_seconds', 'Process uptime in seconds.', process.uptime());
     const memory = process.memoryUsage();
     gauge(
       'swiftchain_process_resident_memory_bytes',
@@ -271,11 +269,7 @@ class PrometheusMetricsService {
         );
       }
     } catch {
-      gauge(
-        'swiftchain_indexer_lag_available',
-        'Whether indexer lag could be measured.',
-        0,
-      );
+      gauge('swiftchain_indexer_lag_available', 'Whether indexer lag could be measured.', 0);
     }
 
     const socketMetrics = socketMetricsService.getMetrics();

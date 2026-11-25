@@ -68,17 +68,19 @@ const numericFilter = (
  * stages live here so controllers/services do not access models directly.
  */
 export class AdminDriverRepository {
-  async search(
-    options: QueryOptions,
-    search?: string,
-  ): Promise<AdminDriverSearchResult> {
+  async search(options: QueryOptions, search?: string): Promise<AdminDriverSearchResult> {
     const rawFilter = (options.filter ?? {}) as Record<string, unknown>;
     const profileMatch: FilterQuery<Record<string, unknown>> = { isDeleted: { $ne: true } };
 
     if (rawFilter.tier !== undefined) {
       const tier = rawFilter.tier;
-      if (typeof tier !== 'string' || !Object.values(ReputationTier).includes(tier as ReputationTier)) {
-        throw ApiError.badRequest('tier must be one of: ' + Object.values(ReputationTier).join(', '));
+      if (
+        typeof tier !== 'string' ||
+        !Object.values(ReputationTier).includes(tier as ReputationTier)
+      ) {
+        throw ApiError.badRequest(
+          'tier must be one of: ' + Object.values(ReputationTier).join(', '),
+        );
       }
       profileMatch.tier = tier;
     }
@@ -94,7 +96,11 @@ export class AdminDriverRepository {
       const reputationRange: Record<string, number> = {};
       if (minReputation !== undefined) reputationRange.$gte = minReputation;
       if (maxReputation !== undefined) reputationRange.$lte = maxReputation;
-      if (minReputation !== undefined && maxReputation !== undefined && minReputation > maxReputation) {
+      if (
+        minReputation !== undefined &&
+        maxReputation !== undefined &&
+        minReputation > maxReputation
+      ) {
         throw ApiError.badRequest('minReputation cannot exceed maxReputation');
       }
       profileMatch.reputationPoints = reputationRange;
