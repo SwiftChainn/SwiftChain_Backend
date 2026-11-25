@@ -48,7 +48,8 @@ import mongoose from 'mongoose';
 import { redisClient } from '../../src/config/redis';
 import { getIndexerLagSnapshot } from '../../src/services/monitorService';
 
-const mongoConnection = (mongoose as unknown as { connection: { getClient: jest.Mock } }).connection;
+const mongoConnection = (mongoose as unknown as { connection: { getClient: jest.Mock } })
+  .connection;
 const redis = redisClient as unknown as { status: string; ping: jest.Mock };
 const indexerLagSnapshot = getIndexerLagSnapshot as jest.Mock;
 
@@ -129,7 +130,9 @@ describe('PrometheusMetricsService', () => {
     expect(output).toContain('swiftchain_mongodb_pool_stats_available 0');
     expect(output).toContain('swiftchain_redis_healthy 0');
     expect(output).toContain('swiftchain_indexer_lag_available 0');
-    expect(output.split('\n').some((line) => line.startsWith('swiftchain_indexer_lag_ledgers '))).toBe(false);
+    expect(
+      output.split('\n').some((line) => line.startsWith('swiftchain_indexer_lag_ledgers ')),
+    ).toBe(false);
   });
 
   it('handles Redis and indexer probe errors without breaking exposition output', async () => {
@@ -149,5 +152,34 @@ describe('PrometheusMetricsService', () => {
     const output = await prometheusMetricsService.render();
 
     expect(output).toContain('route="/api/v1/items/' + '\\' + '"special' + '\\' + '""');
+  });
+
+  it('tracks and renders indexer ingestion counters, last processed ledger, and lag high-water mark (#338)', async () => {
+    prometheusMetricsService.resetIndexerMetrics();
+    indexerLagSnapshot.mockResolvedValueOnce(null);
+
+    prometheusMetricsService.recordIndexerEventProcessed('escrow');
+    prometheusMetricsService.recordIndexerEventProcessed('escrow');
+    prometheusMetricsService.recordIndexerEventProcessed('delivery');
+    prometheusMetricsService.recordIndexerEventFailed('dispute');
+    prometheusMetricsService.recordIndexerIngestionError();
+    prometheusMetricsService.recordIndexerLedgerProgress(100, 150); // lag = 50 (new high-water mark)
+    prometheusMetricsService.recordIndexerLedgerProgress(145, 150); // lag = 5 (high-water mark stays 50)
+
+    const output = await prometheusMetricsService.render();
+
+    expect(output).toContain('# TYPE indexer_events_processed_total counter');
+    expect(output).toContain('indexer_events_processed_total{eventType="escrow"} 2');
+    expect(output).toContain('indexer_events_processed_total{eventType="delivery"} 1');
+    expect(output).toContain('# TYPE indexer_events_failed_total counter');
+    expect(output).toContain('indexer_events_failed_total{eventType="dispute"} 1');
+    expect(output).toContain('# TYPE indexer_ingestion_errors_total counter');
+    expect(output).toContain('indexer_ingestion_errors_total 1');
+    expect(output).toContain('# TYPE indexer_last_processed_ledger gauge');
+    expect(output).toContain('indexer_last_processed_ledger 145');
+    expect(output).toContain('# TYPE indexer_lag_ledgers gauge');
+    expect(output).toContain('indexer_lag_ledgers 5');
+    expect(output).toContain('# TYPE indexer_lag_ledgers_high_water_mark gauge');
+    expect(output).toContain('indexer_lag_ledgers_high_water_mark 50');
   });
 });
