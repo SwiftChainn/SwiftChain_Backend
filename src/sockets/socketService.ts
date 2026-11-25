@@ -1,3 +1,4 @@
+import { deliveryRoom } from './location.service';
 import { Namespace, Socket } from 'socket.io';
 import { IChatMessage } from '../models/ChatMessage';
 import logger from '../config/logger';

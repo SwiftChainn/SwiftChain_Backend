@@ -1,4 +1,8 @@
-import { IChatMessage } from '../models/ChatMessage';
+import { Types } from 'mongoose';
+import { IChatMessage, IReadReceipt } from '../models/ChatMessage';
+import Delivery from '../models/Delivery';
+import User from '../models/User';
+import { UserRole } from '../interfaces/IUser';
 import { isEnabled } from '../config/flags';
 import {
   ChatMessageRepository,
@@ -54,20 +58,6 @@ export class ChatFeatureDisabledError extends Error {
  */
 export class ChatMessageService {
   constructor(private readonly messages: ChatMessageRepository = chatMessageRepository) {}
-
-  /**
-   * Validate an incoming raw payload.
-   *
-   * The query returns newest-first to use the descending `createdAt` index;
-   * the reversal to reading order happens here rather than in the handler so
-   * every caller gets the same ordering.
-   */
-  async getRecentTranscript(limit: number = RECENT_MESSAGE_LIMIT): Promise<IChatMessage[]> {
-    if (!isEnabled('chat')) return [];
-
-    const recent = await this.messages.findRecent(limit);
-    return recent.reverse();
-  }
 
   /**
    * Validate an untrusted payload from a client.
@@ -202,6 +192,7 @@ export class ChatMessageService {
    * @param limit - How many messages to replay. Defaults to RECENT_MESSAGE_LIMIT.
    */
   async getRecentTranscript(limit: number = RECENT_MESSAGE_LIMIT): Promise<IChatMessage[]> {
+    if (!isEnabled('chat')) return [];
     const messages = await this.messages.findRecent(limit);
     return messages.reverse();
   }
