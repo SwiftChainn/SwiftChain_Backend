@@ -20,6 +20,7 @@
  * ledger to report indexer lag.
  */
 
+import { createHash } from 'crypto';
 import { rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
 import EventLog, { IEventLog } from '../models/EventLog';
 import { IndexerStatus } from '../models/IndexerStatus';
@@ -28,6 +29,7 @@ import env from '../config/env';
 import logger from '../config/logger';
 import { nextEventLogRetryAt } from '../utils/eventLogBackoff';
 import { handleEscrowFundedEvent } from '../indexer/escrowHandlers';
+import prometheusMetricsService from './prometheusMetricsService';
 import type { ISorobanRpcClient, SorobanGetEventsRequest } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
 
@@ -96,6 +98,47 @@ const isDuplicateKeyError = (error: unknown): boolean =>
   error !== null &&
   (error as { code?: number }).code === DUPLICATE_KEY_ERROR_CODE;
 
+/** Raised when a late replay reuses a recorded event key with a mutated payload. */
+export class ConflictingEventReplayError extends Error {
+  public readonly transactionHash: string;
+  public readonly eventType: string;
+  public readonly expectedPayloadHash: string;
+  public readonly receivedPayloadHash: string;
+
+  constructor(
+    transactionHash: string,
+    eventType: string,
+    expectedPayloadHash: string,
+    receivedPayloadHash: string,
+  ) {
+    super(
+      `Conflicting replay detected for event (${eventType}, tx=${transactionHash}): ` +
+        `expected payloadHash=${expectedPayloadHash}, received=${receivedPayloadHash}`,
+    );
+    this.name = 'ConflictingEventReplayError';
+    this.transactionHash = transactionHash;
+    this.eventType = eventType;
+    this.expectedPayloadHash = expectedPayloadHash;
+    this.receivedPayloadHash = receivedPayloadHash;
+  }
+}
+
+/** Deterministic SHA-256 fingerprint of a Soroban event's raw XDR topic + value. */
+export const computeEventPayloadHash = (event: StellarRpc.Api.EventResponse): string => {
+  const hash = createHash('sha256');
+  const topicXdrs = Array.isArray(event.topic)
+    ? event.topic.map((item) =>
+        typeof item?.toXDR === 'function' ? item.toXDR('base64') : String(item),
+      )
+    : [];
+  const valueXdr =
+    event.value && typeof event.value.toXDR === 'function'
+      ? event.value.toXDR('base64')
+      : String(event.value ?? '');
+  hash.update(JSON.stringify({ topics: topicXdrs, value: valueXdr }));
+  return hash.digest('hex');
+};
+
 // ─── Poller ────────────────────────────────────────────────────────────────────
 
 export class EventPoller implements EventReplayer {
@@ -155,7 +198,20 @@ export class EventPoller implements EventReplayer {
       failed: 0,
     };
 
-    if (fromLedger > toLedger) return result;
+    if (checkpoint) {
+      prometheusMetricsService.recordIndexerLedgerProgress(
+        checkpoint.lastProcessedLedger,
+        toLedger,
+      );
+    }
+
+    if (fromLedger > toLedger) {
+      prometheusMetricsService.recordIndexerLedgerProgress(
+        checkpoint ? checkpoint.lastProcessedLedger : toLedger,
+        toLedger,
+      );
+      return result;
+    }
 
     for await (const event of this.fetchEvents(fromLedger, toLedger)) {
       result.fetched += 1;
@@ -172,6 +228,8 @@ export class EventPoller implements EventReplayer {
       { $set: { lastProcessedLedger: toLedger, lastProcessedAt: new Date() } },
       { upsert: true },
     );
+
+    prometheusMetricsService.recordIndexerLedgerProgress(toLedger, toLedger);
 
     logger.info(
       `[EventPoller] Cycle complete — network=${network} ledgers=${fromLedger}-${toLedger} ` +
@@ -270,9 +328,27 @@ export class EventPoller implements EventReplayer {
   ): Promise<EventOutcome> {
     const { eventType, handle } = subscription;
     const transactionHash = event.txHash;
+    const payloadHash = computeEventPayloadHash(event);
 
     const existing = await EventLog.findOne({ transactionHash, eventType }).lean();
-    if (existing && existing.status !== 'pending') return 'duplicates';
+    if (existing) {
+      const recordedHash = (existing.eventData as { payloadHash?: string } | null | undefined)
+        ?.payloadHash;
+      if (recordedHash && recordedHash !== payloadHash) {
+        prometheusMetricsService.recordIndexerIngestionError();
+        logger.error(
+          `[EventPoller] Conflicting late replay rejected — type=${eventType} tx=${transactionHash} ` +
+            `ledger=${event.ledger}`,
+        );
+        throw new ConflictingEventReplayError(
+          transactionHash,
+          eventType,
+          recordedHash,
+          payloadHash,
+        );
+      }
+      if (existing.status !== 'pending') return 'duplicates';
+    }
 
     if (!existing) {
       try {
@@ -281,7 +357,11 @@ export class EventPoller implements EventReplayer {
           transactionHash,
           ledgerSequence: event.ledger,
           contractId: this.options.contractId,
-          eventData: { eventId: event.id, ledgerClosedAt: event.ledgerClosedAt },
+          eventData: {
+            eventId: event.id,
+            ledgerClosedAt: event.ledgerClosedAt,
+            payloadHash,
+          },
           status: 'pending',
         });
       } catch (error) {
@@ -294,6 +374,7 @@ export class EventPoller implements EventReplayer {
     try {
       await handle(event);
       await EventLog.markAsProcessed(transactionHash, eventType);
+      prometheusMetricsService.recordIndexerEventProcessed(eventType);
       return 'processed';
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -306,6 +387,7 @@ export class EventPoller implements EventReplayer {
           nextRetryAt: nextEventLogRetryAt(1),
         },
       );
+      prometheusMetricsService.recordIndexerEventFailed(eventType);
       logger.error(
         `[EventPoller] Handler failed — type=${eventType} tx=${transactionHash} ` +
           `ledger=${event.ledger} error="${errorMessage}"`,
@@ -321,6 +403,7 @@ export class EventPoller implements EventReplayer {
         .then(
           () => undefined,
           (error: unknown) => {
+            prometheusMetricsService.recordIndexerIngestionError();
             logger.error(
               `[EventPoller] Cycle failed — error="${
                 error instanceof Error ? error.message : String(error)

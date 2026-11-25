@@ -34,23 +34,25 @@ const safeMetricLabel = (value: string): string =>
 const readMongoPoolSnapshot = (): MongoPoolSnapshot => {
   try {
     const connection = mongoose.connection;
-    const topology = (connection.getClient() as unknown as {
-      topology?: {
-        s?: {
-          servers?: Map<
-            string,
-            {
-              s?: {
-                pool?: {
-                  totalConnectionCount?: number;
-                  availableConnectionCount?: number;
+    const topology = (
+      connection.getClient() as unknown as {
+        topology?: {
+          s?: {
+            servers?: Map<
+              string,
+              {
+                s?: {
+                  pool?: {
+                    totalConnectionCount?: number;
+                    availableConnectionCount?: number;
+                  };
                 };
-              };
-            }
-          >;
+              }
+            >;
+          };
         };
-      };
-    }).topology;
+      }
+    ).topology;
 
     const servers = topology?.s?.servers;
     if (!servers || typeof servers.values !== 'function') {
@@ -82,6 +84,71 @@ const readMongoPoolSnapshot = (): MongoPoolSnapshot => {
 class PrometheusMetricsService {
   private readonly requestCounters = new Map<string, number>();
   private readonly requestHistograms = new Map<string, HistogramSnapshot>();
+  private readonly indexerEventsProcessed = new Map<string, number>();
+  private readonly indexerEventsFailed = new Map<string, number>();
+  private indexerIngestionErrorsTotal = 0;
+  private indexerLastProcessedLedger = 0;
+  private indexerCurrentLagLedgers = 0;
+  private indexerLagHighWaterMark = 0;
+  private hasObservedIndexerLag = false;
+
+  public recordIndexerEventProcessed(eventType: string): void {
+    const label = safeMetricLabel(eventType);
+    this.indexerEventsProcessed.set(label, (this.indexerEventsProcessed.get(label) ?? 0) + 1);
+  }
+
+  public recordIndexerEventFailed(eventType: string): void {
+    const label = safeMetricLabel(eventType);
+    this.indexerEventsFailed.set(label, (this.indexerEventsFailed.get(label) ?? 0) + 1);
+  }
+
+  public recordIndexerIngestionError(): void {
+    this.indexerIngestionErrorsTotal += 1;
+  }
+
+  public recordIndexerLedgerProgress(lastProcessedLedger: number, networkLedger?: number): void {
+    if (Number.isFinite(lastProcessedLedger) && lastProcessedLedger >= 0) {
+      this.indexerLastProcessedLedger = Math.max(
+        this.indexerLastProcessedLedger,
+        Math.floor(lastProcessedLedger),
+      );
+    }
+
+    if (typeof networkLedger === 'number' && Number.isFinite(networkLedger)) {
+      const lag = Math.max(0, Math.floor(networkLedger) - Math.floor(lastProcessedLedger));
+      this.indexerCurrentLagLedgers = lag;
+      this.indexerLagHighWaterMark = Math.max(this.indexerLagHighWaterMark, lag);
+      this.hasObservedIndexerLag = true;
+    }
+  }
+
+  public getIndexerMetricsSnapshot(): {
+    eventsProcessed: Record<string, number>;
+    eventsFailed: Record<string, number>;
+    ingestionErrorsTotal: number;
+    lastProcessedLedger: number;
+    lagLedgers: number;
+    lagHighWaterMark: number;
+  } {
+    return {
+      eventsProcessed: Object.fromEntries(this.indexerEventsProcessed),
+      eventsFailed: Object.fromEntries(this.indexerEventsFailed),
+      ingestionErrorsTotal: this.indexerIngestionErrorsTotal,
+      lastProcessedLedger: this.indexerLastProcessedLedger,
+      lagLedgers: this.indexerCurrentLagLedgers,
+      lagHighWaterMark: this.indexerLagHighWaterMark,
+    };
+  }
+
+  public resetIndexerMetrics(): void {
+    this.indexerEventsProcessed.clear();
+    this.indexerEventsFailed.clear();
+    this.indexerIngestionErrorsTotal = 0;
+    this.indexerLastProcessedLedger = 0;
+    this.indexerCurrentLagLedgers = 0;
+    this.indexerLagHighWaterMark = 0;
+    this.hasObservedIndexerLag = false;
+  }
 
   public recordRequest(
     method: string,
@@ -174,11 +241,7 @@ class PrometheusMetricsService {
       );
     }
 
-    gauge(
-      'swiftchain_process_uptime_seconds',
-      'Process uptime in seconds.',
-      process.uptime(),
-    );
+    gauge('swiftchain_process_uptime_seconds', 'Process uptime in seconds.', process.uptime());
     const memory = process.memoryUsage();
     gauge(
       'swiftchain_process_resident_memory_bytes',
@@ -256,6 +319,9 @@ class PrometheusMetricsService {
       );
     }
 
+    let currentLagLedgers = this.indexerCurrentLagLedgers;
+    let lastProcessedLedger = this.indexerLastProcessedLedger;
+
     try {
       const lag = await getIndexerLagSnapshot();
       gauge(
@@ -264,6 +330,10 @@ class PrometheusMetricsService {
         lag ? 1 : 0,
       );
       if (lag) {
+        currentLagLedgers = lag.lagLedgers;
+        lastProcessedLedger = Math.max(lastProcessedLedger, lag.processedLedger);
+        this.indexerLagHighWaterMark = Math.max(this.indexerLagHighWaterMark, lag.lagLedgers);
+        this.hasObservedIndexerLag = true;
         gauge(
           'swiftchain_indexer_lag_ledgers',
           'Number of ledgers the indexer trails the network by.',
@@ -271,12 +341,45 @@ class PrometheusMetricsService {
         );
       }
     } catch {
-      gauge(
-        'swiftchain_indexer_lag_available',
-        'Whether indexer lag could be measured.',
-        0,
-      );
+      gauge('swiftchain_indexer_lag_available', 'Whether indexer lag could be measured.', 0);
     }
+
+    lines.push(
+      '# HELP indexer_events_processed_total Total Soroban contract events processed by the indexer.',
+      '# TYPE indexer_events_processed_total counter',
+    );
+    for (const [eventType, value] of this.indexerEventsProcessed) {
+      lines.push('indexer_events_processed_total' + labelsToString({ eventType }) + ' ' + value);
+    }
+
+    lines.push(
+      '# HELP indexer_events_failed_total Total Soroban contract events that failed handler execution.',
+      '# TYPE indexer_events_failed_total counter',
+    );
+    for (const [eventType, value] of this.indexerEventsFailed) {
+      lines.push('indexer_events_failed_total' + labelsToString({ eventType }) + ' ' + value);
+    }
+
+    counter(
+      'indexer_ingestion_errors_total',
+      'Total indexer ingestion and RPC poll errors since process start.',
+      this.indexerIngestionErrorsTotal,
+    );
+    gauge(
+      'indexer_last_processed_ledger',
+      'Highest ledger sequence processed by the event indexer.',
+      lastProcessedLedger,
+    );
+    gauge(
+      'indexer_lag_ledgers',
+      'Current number of ledgers the indexer trails behind the network head.',
+      this.hasObservedIndexerLag ? currentLagLedgers : 0,
+    );
+    gauge(
+      'indexer_lag_ledgers_high_water_mark',
+      'Maximum ledger lag observed by the indexer since process start.',
+      this.indexerLagHighWaterMark,
+    );
 
     const socketMetrics = socketMetricsService.getMetrics();
     gauge(
