@@ -5,6 +5,7 @@ export const FEATURE_FLAG_DEFAULTS = {
   deliveryPooling: true,
   chat: true,
   milestones: false,
+  adminContractOps: false,
 } as const;
 
 export type FeatureFlag = keyof typeof FEATURE_FLAG_DEFAULTS;
@@ -64,6 +65,7 @@ const featureFlags = parseFeatureFlags(env.FEATURE_FLAGS, {
   deliveryPooling: env.FEATURE_DELIVERY_POOLING_ENABLED,
   chat: env.FEATURE_CHAT_ENABLED,
   milestones: env.FEATURE_MILESTONES_ENABLED,
+  adminContractOps: env.FEATURE_ADMIN_CONTRACT_OPS_ENABLED,
 });
 
 /** Return whether a known optional feature is enabled in this process. */

@@ -26,6 +26,7 @@ import { IndexerStatus } from '../models/IndexerStatus';
 import { escrowIndexerConfig } from '../config/escrow';
 import env from '../config/env';
 import logger from '../config/logger';
+import { entityIdFromEvent, indexerLog } from '../utils/indexerLog';
 import { nextEventLogRetryAt } from '../utils/eventLogBackoff';
 import { handleEscrowFundedEvent } from '../indexer/escrowHandlers';
 import type { ISorobanRpcClient, SorobanGetEventsRequest } from './providers/sorobanRpcClient';
@@ -146,6 +147,7 @@ export class EventPoller implements EventReplayer {
     // With no checkpoint yet, begin at the head rather than replaying history.
     const fromLedger = checkpoint ? checkpoint.lastProcessedLedger + 1 : toLedger;
 
+    const { contractId } = this.options;
     const result: PollCycleResult = {
       fromLedger,
       toLedger,
@@ -155,7 +157,22 @@ export class EventPoller implements EventReplayer {
       failed: 0,
     };
 
-    if (fromLedger > toLedger) return result;
+    if (fromLedger > toLedger) {
+      indexerLog(
+        'debug',
+        '[EventPoller] No new ledgers to ingest',
+        { ledgerSeq: toLedger, contractId },
+        { network, fromLedger, toLedger },
+      );
+      return result;
+    }
+
+    indexerLog(
+      'debug',
+      '[EventPoller] Ingesting ledger range',
+      { ledgerSeq: fromLedger, contractId },
+      { network, fromLedger, toLedger },
+    );
 
     for await (const event of this.fetchEvents(fromLedger, toLedger)) {
       result.fetched += 1;
@@ -173,10 +190,19 @@ export class EventPoller implements EventReplayer {
       { upsert: true },
     );
 
-    logger.info(
-      `[EventPoller] Cycle complete — network=${network} ledgers=${fromLedger}-${toLedger} ` +
-        `fetched=${result.fetched} processed=${result.processed} ` +
-        `duplicates=${result.duplicates} failed=${result.failed}`,
+    indexerLog(
+      'debug',
+      '[EventPoller] Checkpoint advanced',
+      { ledgerSeq: toLedger, contractId },
+      { network, previousLedger: fromLedger - 1 },
+    );
+
+    // An idle cycle runs every interval, so it is only worth a routine line.
+    indexerLog(
+      result.fetched > 0 ? 'info' : 'debug',
+      '[EventPoller] Cycle complete',
+      { ledgerSeq: toLedger, contractId },
+      { network, ...result },
     );
 
     return result;
@@ -268,11 +294,24 @@ export class EventPoller implements EventReplayer {
     subscription: EventSubscription,
     event: StellarRpc.Api.EventResponse,
   ): Promise<EventOutcome> {
-    const { eventType, handle } = subscription;
+    const { eventType, handle, topic } = subscription;
     const transactionHash = event.txHash;
+    const context = {
+      ledgerSeq: event.ledger,
+      eventType,
+      contractId: this.options.contractId,
+      entityId: entityIdFromEvent(event),
+    };
 
     const existing = await EventLog.findOne({ transactionHash, eventType }).lean();
-    if (existing && existing.status !== 'pending') return 'duplicates';
+    if (existing && existing.status !== 'pending') {
+      indexerLog('debug', '[EventPoller] Duplicate event skipped', context, {
+        topic,
+        transactionHash,
+        recordedStatus: existing.status,
+      });
+      return 'duplicates';
+    }
 
     if (!existing) {
       try {
@@ -286,14 +325,28 @@ export class EventPoller implements EventReplayer {
         });
       } catch (error) {
         // A concurrent writer recorded the same event between our read and write.
-        if (isDuplicateKeyError(error)) return 'duplicates';
+        if (isDuplicateKeyError(error)) {
+          indexerLog('debug', '[EventPoller] Duplicate event skipped', context, {
+            topic,
+            transactionHash,
+            recordedStatus: 'concurrent',
+          });
+          return 'duplicates';
+        }
         throw error;
       }
     }
 
+    indexerLog('debug', '[EventPoller] Dispatching event to handler', context, {
+      topic,
+      transactionHash,
+      resumed: existing !== null,
+    });
+
     try {
       await handle(event);
       await EventLog.markAsProcessed(transactionHash, eventType);
+      indexerLog('debug', '[EventPoller] Event processed', context, { topic, transactionHash });
       return 'processed';
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -306,10 +359,11 @@ export class EventPoller implements EventReplayer {
           nextRetryAt: nextEventLogRetryAt(1),
         },
       );
-      logger.error(
-        `[EventPoller] Handler failed — type=${eventType} tx=${transactionHash} ` +
-          `ledger=${event.ledger} error="${errorMessage}"`,
-      );
+      indexerLog('error', '[EventPoller] Handler failed', context, {
+        topic,
+        transactionHash,
+        error: errorMessage,
+      });
       return 'failed';
     }
   }
@@ -321,10 +375,14 @@ export class EventPoller implements EventReplayer {
         .then(
           () => undefined,
           (error: unknown) => {
-            logger.error(
-              `[EventPoller] Cycle failed — error="${
-                error instanceof Error ? error.message : String(error)
-              }"`,
+            indexerLog(
+              'error',
+              '[EventPoller] Cycle failed',
+              { contractId: this.options.contractId },
+              {
+                network: this.options.network,
+                error: error instanceof Error ? error.message : String(error),
+              },
             );
           },
         )
@@ -369,9 +427,11 @@ export const startEventPoller = (): void => {
 
   activePoller = createDefaultPoller();
   activePoller.start();
-  logger.info(
-    `[EventPoller] Started — network=${env.STELLAR_NETWORK} contract=${escrowIndexerConfig.contractId} ` +
-      `topic=${escrowIndexerConfig.fundedEventTopic}`,
+  indexerLog(
+    'info',
+    '[EventPoller] Started',
+    { contractId: escrowIndexerConfig.contractId },
+    { network: env.STELLAR_NETWORK, topic: escrowIndexerConfig.fundedEventTopic },
   );
 };
 

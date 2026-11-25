@@ -4,12 +4,13 @@ import {
 } from '../src/config/flags';
 
 describe('feature flag configuration', () => {
-  it('preserves existing optional behavior by default and leaves milestones disabled', () => {
+  it('preserves existing optional behavior by default and leaves milestones and admin contract ops disabled', () => {
     expect(FEATURE_FLAG_DEFAULTS).toEqual({
       webhookBatching: true,
       deliveryPooling: true,
       chat: true,
       milestones: false,
+      adminContractOps: false,
     });
   });
 
@@ -19,12 +20,14 @@ describe('feature flag configuration', () => {
       deliveryPooling: true,
       chat: false,
       milestones: false,
+      adminContractOps: false,
     });
     expect(parseFeatureFlags('milestones')).toEqual({
       webhookBatching: true,
       deliveryPooling: true,
       chat: true,
       milestones: true,
+      adminContractOps: false,
     });
   });
 
@@ -34,6 +37,7 @@ describe('feature flag configuration', () => {
       deliveryPooling: false,
       chat: true,
       milestones: false,
+      adminContractOps: false,
     });
   });
 

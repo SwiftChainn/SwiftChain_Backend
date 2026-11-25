@@ -1,6 +1,6 @@
 import EventLog from '../models/EventLog';
 import Delivery from '../models/Delivery';
-import logger from '../config/logger';
+import { indexerLog } from '../utils/indexerLog';
 import { emitDeliveryStatusUpdated } from '../sockets/connectionHandler';
 import type { ISorobanRpcClient } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
@@ -43,27 +43,29 @@ export class IndexerService {
         };
       });
     } catch (error) {
-      logger.error(
-        `[IndexerService] Error fetching indexer status: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+      indexerLog(
+        'error',
+        '[IndexerService] Error fetching indexer status',
+        {},
+        { error: error instanceof Error ? error.message : String(error) },
       );
       throw error;
     }
   }
 
   public async processDeliveryStatusUpdated(event: DeliveryStatusUpdatedEvent): Promise<void> {
+    const { contractId, deliveryId, newStatus } = event;
+    const context = { eventType: 'delivery', contractId, entityId: deliveryId };
     try {
-      const { contractId, deliveryId, newStatus } = event;
       const updatedDelivery = await Delivery.findOneAndUpdate(
         { _id: deliveryId, contractId },
         { status: newStatus },
         { new: true, runValidators: true },
       ).lean();
       if (!updatedDelivery) {
-        logger.warn(
-          `[IndexerService] Delivery not found for id ${deliveryId} on contract ${contractId}`,
-        );
+        indexerLog('warn', '[IndexerService] Delivery not found for status update', context, {
+          newStatus,
+        });
         return;
       }
       // Push the transition to any connected realtime clients (no-op when the
@@ -73,14 +75,16 @@ export class IndexerService {
         deliveryId,
         status: newStatus,
       });
-      logger.info(
-        `[IndexerService] Delivery ${deliveryId} status updated to ${newStatus} on contract ${contractId}`,
-      );
+      indexerLog('debug', '[IndexerService] Delivery status updated', context, { newStatus });
     } catch (error) {
-      logger.error(
-        `[IndexerService] Error processing delivery_status_updated event: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+      indexerLog(
+        'error',
+        '[IndexerService] Error processing delivery_status_updated event',
+        context,
+        {
+          newStatus,
+          error: error instanceof Error ? error.message : String(error),
+        },
       );
       throw error;
     }

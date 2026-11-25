@@ -122,6 +122,7 @@ const annotatedRouteFiles = [
   'deliveryEventRoutes',
   'driverRoutes',
   'adminRoutes',
+  'adminContractRoutes',
   'escrow.routes',
   'escrowAdminRoutes',
   'escrowIndexer.routes',

@@ -25,6 +25,7 @@ interface EnvConfig {
   FEATURE_DELIVERY_POOLING_ENABLED?: boolean;
   FEATURE_CHAT_ENABLED?: boolean;
   FEATURE_MILESTONES_ENABLED?: boolean;
+  FEATURE_ADMIN_CONTRACT_OPS_ENABLED?: boolean;
   UPLOAD_STORAGE_DRIVER: string;
   UPLOAD_LOCAL_DIR: string;
   UPLOAD_MAX_FILE_SIZE_MB: number;
@@ -153,8 +154,17 @@ interface EnvConfig {
   /** Optional at boot; endpoints that need it return 503. */
   SOROBAN_ESCROW_CONTRACT_ID?: string;
   SOROBAN_ESCROW_LOCK_FUNCTION: string;
+  /** Escrow contract function invoked to release funds. Default: release_escrow */
+  SOROBAN_ESCROW_RELEASE_FUNCTION: string;
+  /** Escrow contract function invoked to refund funds. Default: refund_escrow */
+  SOROBAN_ESCROW_REFUND_FUNCTION: string;
   STELLAR_BASE_FEE: number;
   STELLAR_TRANSACTION_TIMEOUT_SECONDS: number;
+  /**
+   * Secret seed (`S...`) of the account that signs admin contract deploy/init
+   * transactions. Optional; those endpoints return 503 without it.
+   */
+  ADMIN_CONTRACT_DEPLOYER_SECRET?: string;
 
   // ── Escrow indexer ────────────────────────────────────────────
   /** Contract id the escrow indexer watches. Blank disables indexer jobs. */
@@ -299,6 +309,13 @@ const envSchema = z.object({
     blankToUndefined,
     z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
   ),
+  FEATURE_ADMIN_CONTRACT_OPS_ENABLED: z.preprocess(
+    blankToUndefined,
+    z
+      .enum(['true', 'false'])
+      .transform((value) => value === 'true')
+      .optional(),
+  ),
 
   // ── Uploads / storage ──────────────────────────────────────────────────────
   UPLOAD_STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
@@ -400,8 +417,11 @@ const envSchema = z.object({
   SOROBAN_RPC_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
   SOROBAN_ESCROW_CONTRACT_ID: z.string().trim().default(''),
   SOROBAN_ESCROW_LOCK_FUNCTION: z.string().trim().min(1).default('lock_escrow'),
+  SOROBAN_ESCROW_RELEASE_FUNCTION: z.string().trim().min(1).default('release_escrow'),
+  SOROBAN_ESCROW_REFUND_FUNCTION: z.string().trim().min(1).default('refund_escrow'),
   STELLAR_BASE_FEE: numeric(z.coerce.number().int().min(1).default(100)),
   STELLAR_TRANSACTION_TIMEOUT_SECONDS: numeric(z.coerce.number().int().min(1).default(300)),
+  ADMIN_CONTRACT_DEPLOYER_SECRET: z.preprocess(blankToUndefined, z.string().trim().optional()),
 
   // ── Escrow indexer ─────────────────────────────────────────────────────────
   ESCROW_CONTRACT_ID: z.string().trim().default(''),

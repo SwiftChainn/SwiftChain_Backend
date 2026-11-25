@@ -27,6 +27,10 @@ export interface StellarConfig {
   escrowContractId?: string;
   /** Escrow contract function invoked to lock funds. */
   escrowLockFunction: string;
+  /** Escrow contract function invoked to release funds. */
+  escrowReleaseFunction: string;
+  /** Escrow contract function invoked to refund funds. */
+  escrowRefundFunction: string;
   /** Base fee (in stroops) used when building transactions. */
   baseFee: string;
   /** Validity window, in seconds, of generated unsigned transactions. */
@@ -86,6 +90,8 @@ function resolveStellarConfig(): StellarConfig {
     timeoutMs: env.SOROBAN_RPC_TIMEOUT_MS,
     escrowContractId,
     escrowLockFunction: env.SOROBAN_ESCROW_LOCK_FUNCTION,
+    escrowReleaseFunction: env.SOROBAN_ESCROW_RELEASE_FUNCTION,
+    escrowRefundFunction: env.SOROBAN_ESCROW_REFUND_FUNCTION,
     // The SDK's transaction builder expects the fee as a string.
     baseFee: String(env.STELLAR_BASE_FEE),
     transactionTimeoutSeconds: env.STELLAR_TRANSACTION_TIMEOUT_SECONDS,
