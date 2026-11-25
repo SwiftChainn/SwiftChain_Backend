@@ -1,24 +1,18 @@
 import { assertLockContractAsset } from './currencyService';
-import {
-  Account,
-  Address,
-  Contract,
-  Transaction,
-  TransactionBuilder,
-  nativeToScVal,
-} from '@stellar/stellar-sdk';
+import { Account, Transaction } from '@stellar/stellar-sdk';
 import { StatusCodes } from 'http-status-codes';
 import CircuitBreaker from 'opossum';
 import { stellarConfig } from '../config/stellar';
 import { deliveryService } from './delivery.service';
 import { DeliveryStatus, IDelivery } from '../models/Delivery';
-import { fromStroops, toStroops } from '../utils/stroops';
+import { fromStroops } from '../utils/stroops';
 import AppError from '../utils/AppError';
 import logger from '../config/logger';
 import env from '../config/env';
 import { createCircuitBreaker, fireWithBreaker } from '../utils/circuitBreaker';
 import type { ISorobanRpcClient } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
+import { EscrowTransactionBuilder } from './escrowTransactionBuilder';
 
 /** Input accepted by {@link TransactionService.buildEscrowLockXdr}. */
 export interface EscrowLockXdrInput {
@@ -80,6 +74,7 @@ const NON_LOCKABLE_STATUSES: ReadonlySet<DeliveryStatus> = new Set([
 export class TransactionService {
   private readonly client: ISorobanRpcClient;
   private readonly breaker: CircuitBreaker<[() => Promise<unknown>], unknown>;
+  private readonly builder: EscrowTransactionBuilder;
 
   constructor(client: ISorobanRpcClient = defaultSorobanRpcClient) {
     this.client = client;
@@ -96,6 +91,11 @@ export class TransactionService {
       volumeThreshold: env.CB_SOROBAN_VOLUME_THRESHOLD,
       timeoutMs: env.CB_SOROBAN_TIMEOUT_MS,
     });
+
+    this.builder = new EscrowTransactionBuilder({
+      loadAccount: (address: string): Promise<Account> => this.loadAccount(address),
+      prepare: (transaction: Transaction): Promise<Transaction> => this.prepare(transaction),
+    });
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -111,32 +111,18 @@ export class TransactionService {
    * @throws {AppError} 502 when the RPC simulation rejects the transaction.
    */
   public async buildEscrowLockXdr(input: EscrowLockXdrInput): Promise<EscrowLockXdrResult> {
-    const contractId = this.requireEscrowContractId();
     const delivery = await deliveryService.getById(input.deliveryId);
 
     this.assertLockable(delivery);
     assertLockContractAsset(delivery.escrowAsset ?? { code: 'XLM' });
-    const amount = this.resolveEscrowAmount(delivery);
-    const stroops = this.toContractAmount(amount);
+    const amount = Number(delivery.escrowAmount);
 
-    const sourceAccount = await this.loadAccount(input.payerAddress);
-
-    const operation = new Contract(contractId).call(
-      stellarConfig.escrowLockFunction,
-      new Address(input.payerAddress).toScVal(),
-      nativeToScVal(this.escrowReference(delivery), { type: 'string' }),
-      nativeToScVal(stroops, { type: 'i128' }),
-    );
-
-    const transaction = new TransactionBuilder(sourceAccount, {
-      fee: stellarConfig.baseFee,
-      networkPassphrase: stellarConfig.networkPassphrase,
-    })
-      .addOperation(operation)
-      .setTimeout(stellarConfig.transactionTimeoutSeconds)
-      .build();
-
-    const prepared = await this.prepare(transaction);
+    const envelope = await this.builder.buildFund({
+      payerAddress: input.payerAddress,
+      escrowReference: this.escrowReference(delivery),
+      amount,
+    });
+    const { transaction: prepared, stroops } = envelope;
 
     logger.info(
       `[TransactionService] Escrow-lock XDR built — delivery=${String(delivery._id)} ` +
@@ -145,12 +131,12 @@ export class TransactionService {
     );
 
     return {
-      xdr: prepared.toXDR(),
+      xdr: envelope.xdr,
       network: stellarConfig.network,
-      networkPassphrase: stellarConfig.networkPassphrase,
-      contractId,
-      contractFunction: stellarConfig.escrowLockFunction,
-      sourceAccount: input.payerAddress,
+      networkPassphrase: envelope.networkPassphrase,
+      contractId: envelope.contractId,
+      contractFunction: envelope.contractFunction,
+      sourceAccount: envelope.sourceAccount,
       sequence: prepared.sequence,
       fee: prepared.fee,
       validUntil: Number(prepared.timeBounds?.maxTime ?? 0),
@@ -171,45 +157,11 @@ export class TransactionService {
 
   // ── Private helpers ────────────────────────────────────────────────────────
 
-  private requireEscrowContractId(): string {
-    const contractId = stellarConfig.escrowContractId;
-    if (!contractId) {
-      logger.error('[TransactionService] SOROBAN_ESCROW_CONTRACT_ID is not configured');
-      throw new AppError(
-        'Escrow contract is not configured on this deployment.',
-        StatusCodes.SERVICE_UNAVAILABLE,
-      );
-    }
-    return contractId;
-  }
-
   private assertLockable(delivery: IDelivery): void {
     if (NON_LOCKABLE_STATUSES.has(delivery.status)) {
       throw new AppError(
         `Escrow cannot be locked for a delivery with status '${delivery.status}'.`,
         StatusCodes.CONFLICT,
-      );
-    }
-  }
-
-  private resolveEscrowAmount(delivery: IDelivery): number {
-    const amount = delivery.escrowAmount;
-    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-      throw new AppError(
-        'Delivery does not define a positive escrow amount.',
-        StatusCodes.UNPROCESSABLE_ENTITY,
-      );
-    }
-    return amount;
-  }
-
-  private toContractAmount(amount: number): bigint {
-    try {
-      return toStroops(amount);
-    } catch (error) {
-      throw new AppError(
-        `Delivery escrow amount cannot be represented on-chain: ${extractMessage(error)}`,
-        StatusCodes.UNPROCESSABLE_ENTITY,
       );
     }
   }

@@ -153,6 +153,10 @@ interface EnvConfig {
   /** Optional at boot; endpoints that need it return 503. */
   SOROBAN_ESCROW_CONTRACT_ID?: string;
   SOROBAN_ESCROW_LOCK_FUNCTION: string;
+  /** Escrow contract function invoked to release funds. Default: release_escrow */
+  SOROBAN_ESCROW_RELEASE_FUNCTION: string;
+  /** Escrow contract function invoked to refund funds. Default: refund_escrow */
+  SOROBAN_ESCROW_REFUND_FUNCTION: string;
   STELLAR_BASE_FEE: number;
   STELLAR_TRANSACTION_TIMEOUT_SECONDS: number;
 
@@ -400,6 +404,8 @@ const envSchema = z.object({
   SOROBAN_RPC_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
   SOROBAN_ESCROW_CONTRACT_ID: z.string().trim().default(''),
   SOROBAN_ESCROW_LOCK_FUNCTION: z.string().trim().min(1).default('lock_escrow'),
+  SOROBAN_ESCROW_RELEASE_FUNCTION: z.string().trim().min(1).default('release_escrow'),
+  SOROBAN_ESCROW_REFUND_FUNCTION: z.string().trim().min(1).default('refund_escrow'),
   STELLAR_BASE_FEE: numeric(z.coerce.number().int().min(1).default(100)),
   STELLAR_TRANSACTION_TIMEOUT_SECONDS: numeric(z.coerce.number().int().min(1).default(300)),
 
