@@ -291,19 +291,36 @@ node dist/server.js
 
 ## Seed Data
 
-Run the seed script with:
+The seed CLI lives in `src/scripts/seed.ts` and writes through
+`src/services/seedService.ts`. Every command is idempotent: rows are matched on
+their business key (user email or delivery id), so re-running a command skips
+existing rows instead of duplicating them.
 
-```bash
-pnpm seed
-```
+| Command | What it does |
+| --- | --- |
+| `pnpm seed` | Seeds the demo deliveries (the original `pnpm seed` behaviour) |
+| `pnpm seed:users` | Seeds the demo accounts |
+| `pnpm seed:deliveries` | Seeds `DEL-001` through `DEL-003` |
+| `pnpm seed:demo` | Seeds the demo users and deliveries |
+| `pnpm seed:clear` | Deletes only the demo users and deliveries |
 
-The script executes:
+Flags (pass after the script, e.g. `pnpm seed:demo -- --dry-run`):
+
+- `--dry-run` reports what would change without writing anything.
+- `--force` is required for `seed:clear` and for any run when
+  `NODE_ENV=production`.
+
+Demo accounts share the password `Password123!`:
 
 ```text
-src/seed.ts
+admin@swiftchain.dev
+sender@swiftchain.dev
+recipient@swiftchain.dev
+driver@swiftchain.dev
 ```
 
-Confirm the active `MONGODB_URI` before running it.
+Confirm the active `MONGODB_URI` before running any seed command; the CLI
+validates it (and refuses production without `--force`) before writing.
 
 ## Linting and Formatting
 

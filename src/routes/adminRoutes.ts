@@ -9,6 +9,7 @@ import { UserRole } from '../interfaces/IUser';
 import { buildQueryOptions } from '../middlewares/queryMiddleware';
 import { QueryFeatureConfig } from '../types/query';
 import { searchAdminDrivers } from '../controllers/adminDriverSearchController';
+import { listHandoffAudit } from '../controllers/auditController';
 
 const router = Router();
 
@@ -433,5 +434,7 @@ router.get('/eventlog/failed', eventLogController.getFailedEvents.bind(eventLogC
  *         description: No escrow contract is configured to replay against
  */
 router.post('/eventlog/:id/retry', eventLogController.retryFailedEvent.bind(eventLogController));
+
+router.get('/handoff-audit', listHandoffAudit);
 
 export default router;

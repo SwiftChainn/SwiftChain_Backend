@@ -44,6 +44,12 @@ export interface EventSubscription {
   handle: (event: StellarRpc.Api.EventResponse) => Promise<unknown>;
 }
 
+/**
+ * Fetches the events after `lastLedger`, in ledger order. The poller bounds the
+ * result to the latest ledger of the cycle and stamps each event it ingests.
+ */
+export type FetchNextEvents = (lastLedger: number) => AsyncIterable<StellarRpc.Api.EventResponse>;
+
 export interface EventPollerOptions {
   rpc: ISorobanRpcClient;
   /** Network alias the IndexerStatus checkpoint is stored under. */
@@ -59,6 +65,12 @@ export interface EventPollerOptions {
   jitterRatio?: number;
   /** Events requested per `getEvents` page. */
   pageSize: number;
+  /**
+   * Optional event source. When omitted the poller pages the RPC node itself;
+   * injecting a fetcher keeps the loop testable with fakes or lets another
+   * source feed the pipeline.
+   */
+  fetchNextEvents?: FetchNextEvents;
 }
 
 export interface PollCycleResult {
@@ -191,7 +203,8 @@ export class EventPoller implements EventReplayer {
 
     const checkpoint = await IndexerStatus.findOne({ network }).lean();
     // With no checkpoint yet, begin at the head rather than replaying history.
-    const fromLedger = checkpoint ? checkpoint.lastProcessedLedger + 1 : toLedger;
+    const lastLedger = checkpoint ? checkpoint.lastProcessedLedger : toLedger - 1;
+    const fromLedger = lastLedger + 1;
 
     const result: PollCycleResult = {
       fromLedger,
@@ -204,7 +217,15 @@ export class EventPoller implements EventReplayer {
 
     if (fromLedger > toLedger) return result;
 
-    for await (const event of this.fetchEvents(fromLedger, toLedger)) {
+    const events = this.options.fetchNextEvents
+      ? this.options.fetchNextEvents(lastLedger)
+      : this.fetchEvents(fromLedger, toLedger);
+
+    for await (const event of events) {
+      // The injected fetcher may overshoot the window or repeat a ledger.
+      if (event.ledger < fromLedger) continue;
+      if (event.ledger > toLedger) break;
+
       result.fetched += 1;
 
       const subscription = this.subscriptionForEvent(event);

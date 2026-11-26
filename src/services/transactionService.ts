@@ -19,6 +19,7 @@ import env from '../config/env';
 import { createCircuitBreaker, fireWithBreaker } from '../utils/circuitBreaker';
 import type { ISorobanRpcClient } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
+import { estimateTransactionFee } from './sorobanFees';
 
 /** Input accepted by {@link TransactionService.buildEscrowLockXdr}. */
 export interface EscrowLockXdrInput {
@@ -128,8 +129,12 @@ export class TransactionService {
       nativeToScVal(stroops, { type: 'i128' }),
     );
 
+    const estimatedFee = estimateTransactionFee('escrow_lock', {
+      amountStroops: stroops.toString(),
+      reference: this.escrowReference(delivery),
+    });
     const transaction = new TransactionBuilder(sourceAccount, {
-      fee: stellarConfig.baseFee,
+      fee: estimatedFee,
       networkPassphrase: stellarConfig.networkPassphrase,
     })
       .addOperation(operation)
@@ -141,7 +146,7 @@ export class TransactionService {
     logger.info(
       `[TransactionService] Escrow-lock XDR built — delivery=${String(delivery._id)} ` +
         `payer=${input.payerAddress} amount=${amount} stroops=${stroops.toString()} ` +
-        `fee=${prepared.fee}`,
+        `estimatedFee=${estimatedFee} appliedFee=${prepared.fee}`,
     );
 
     return {

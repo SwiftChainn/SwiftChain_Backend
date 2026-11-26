@@ -17,6 +17,7 @@ import { getStorageDriver } from './storage.service';
 import env from '../config/env';
 import AppError from '../utils/AppError';
 import logger from '../config/logger';
+import crypto from 'crypto';
 
 // ─── Constraints ───────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ export interface UploadProofOfDeliveryInput {
   mimeType: string;
   buffer: Buffer;
   sizeBytes: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 // ─── Service ───────────────────────────────────────────────────────────────────
@@ -106,6 +109,24 @@ export class ProofOfDeliveryService {
       mimeType,
     );
 
+    const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    const signedAt = new Date();
+    const payload = {
+      schema: 'swiftchain.pod.v1',
+      deliveryId,
+      driverId: uploadedBy,
+      photoHash: contentHash,
+      photoRef: stored.key,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      timestamp: signedAt.toISOString(),
+    };
+    const canonicalPayload = JSON.stringify(payload);
+    const signature = crypto
+      .createHmac('sha256', env.POD_ATTESTATION_SECRET)
+      .update(canonicalPayload)
+      .digest('hex');
+
     const proofOfDelivery: IProofOfDelivery = {
       storageKey: stored.key,
       imageUrl: stored.url,
@@ -113,7 +134,14 @@ export class ProofOfDeliveryService {
       mimeType,
       sizeBytes,
       uploadedBy,
-      uploadedAt: new Date(),
+      uploadedAt: signedAt,
+      contentHash,
+      signedPayload: {
+        payload,
+        canonicalPayload,
+        signature,
+        signedAt,
+      },
     };
 
     delivery.proofOfDelivery = proofOfDelivery;
@@ -164,6 +192,25 @@ export class ProofOfDeliveryService {
         StatusCodes.UNPROCESSABLE_ENTITY,
       );
     }
+  }
+
+  /**
+   * Verify the authenticity of a proof-of-delivery record's signed payload.
+   *
+   * This can be used to detect tampering by third parties.
+   *
+   * @param {IProofOfDelivery} proof - The proof-of-delivery record to verify.
+   * @returns {boolean} `true` if the payload is valid and untampered, else `false`.
+   */
+  verifySignedPayload(proof: IProofOfDelivery): boolean {
+    if (!proof.signedPayload?.canonicalPayload || !proof.signedPayload.signature) return false;
+    const expected = crypto
+      .createHmac('sha256', env.POD_ATTESTATION_SECRET)
+      .update(proof.signedPayload.canonicalPayload)
+      .digest('hex');
+    const actual = Buffer.from(proof.signedPayload.signature, 'hex');
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    return actual.length === expectedBuffer.length && crypto.timingSafeEqual(actual, expectedBuffer);
   }
 }
 

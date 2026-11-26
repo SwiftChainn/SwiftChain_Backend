@@ -3,7 +3,7 @@
 ## Steps
 
 - [x] 1. Create `src/models/EventLog.ts` — Mongoose model to persist last processed ledger per event type
-- [x] 2. Create `src/services/eventPoller.ts` — Continuous polling loop with event dispatch
+- [x] 2. Create `src/services/eventPoller.ts` — Continuous polling loop with event dispatch, configurable tick interval, `isRunning`, and an injectable `fetchNextEvents(lastLedger)` source (RPC paging by default)
 - [x] 3. Edit `src/server.ts` — Integrate start/stop of event poller
 - [x] 4. Verify TypeScript compilation (`npx tsc --noEmit`). Only error: a stray line in `tests/deliveryStatusTransition.test.ts:96`, which is also on `main`.
 - [x] 5. Run existing tests. The 14 failing suites also fail on `main` (see PR description); no new failing suites.
