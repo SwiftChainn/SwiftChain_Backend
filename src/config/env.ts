@@ -298,7 +298,8 @@ const envSchema = z.object({
   RATE_LIMIT_MAX_REQUESTS: numeric(z.coerce.number().int().min(1).default(100)),
   ENABLE_METRICS: z.preprocess(
     blankToUndefined,
-    z.enum(['true', 'false'])
+    z
+      .enum(['true', 'false'])
       .default('false')
       .transform((value) => value === 'true'),
   ),
@@ -306,19 +307,31 @@ const envSchema = z.object({
   FEATURE_FLAGS: z.string().trim().default(''),
   FEATURE_WEBHOOK_BATCHING_ENABLED: z.preprocess(
     blankToUndefined,
-    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+    z
+      .enum(['true', 'false'])
+      .transform((value) => value === 'true')
+      .optional(),
   ),
   FEATURE_DELIVERY_POOLING_ENABLED: z.preprocess(
     blankToUndefined,
-    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+    z
+      .enum(['true', 'false'])
+      .transform((value) => value === 'true')
+      .optional(),
   ),
   FEATURE_CHAT_ENABLED: z.preprocess(
     blankToUndefined,
-    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+    z
+      .enum(['true', 'false'])
+      .transform((value) => value === 'true')
+      .optional(),
   ),
   FEATURE_MILESTONES_ENABLED: z.preprocess(
     blankToUndefined,
-    z.enum(['true', 'false']).transform((value) => value === 'true').optional(),
+    z
+      .enum(['true', 'false'])
+      .transform((value) => value === 'true')
+      .optional(),
   ),
 
   // ── Uploads / storage ──────────────────────────────────────────────────────
@@ -348,12 +361,8 @@ const envSchema = z.object({
 
   // ── Indexer lag monitoring ─────────────────────────────────────────────────
   // ── Indexer lag monitoring ─────────────────────────────────────────────────
-  INDEXER_LAG_ALERT_THRESHOLD: numeric(
-    z.coerce.number().int().min(1).default(100),
-  ),
-  INDEXER_LAG_CHECK_INTERVAL_MS: numeric(
-    z.coerce.number().int().min(1000).default(60000),
-  ),
+  INDEXER_LAG_ALERT_THRESHOLD: numeric(z.coerce.number().int().min(1).default(100)),
+  INDEXER_LAG_CHECK_INTERVAL_MS: numeric(z.coerce.number().int().min(1000).default(60000)),
   INDEXER_LAG_WEBHOOK_URL: z.string().trim().default(''),
 
   // ── Soroban RPC retry config ────────────────────────────────────────────────

@@ -107,8 +107,6 @@ router.use(requireRole(UserRole.ADMIN));
  */
 router.get('/drivers', buildQueryOptions(adminDriverQueryConfig), searchAdminDrivers);
 
-
-
 /**
  * @openapi
  * /v1/admin/dashboard:

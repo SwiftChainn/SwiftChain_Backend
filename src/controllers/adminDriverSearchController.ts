@@ -28,12 +28,7 @@ export const searchAdminDrivers = async (
       rawSearch as string | undefined,
     );
 
-    sendSuccess(
-      res,
-      result,
-      'Drivers retrieved successfully',
-      StatusCodes.OK,
-    );
+    sendSuccess(res, result, 'Drivers retrieved successfully', StatusCodes.OK);
   } catch (error) {
     next(error);
   }
