@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import mongoose, { Schema } from 'mongoose';
 import { startTrackedSession } from '../config/database';
 import logger from '../config/logger';
 
@@ -9,7 +9,6 @@ export interface IEventLog {
   contractId?: string;
   eventData: Record<string, unknown>;
   indexedAt?: Date;
-  eventData?: Record<string, unknown>;
   processedAt: Date | null;
   status: 'pending' | 'processed' | 'failed';
   errorMessage?: string | null;
@@ -51,25 +50,7 @@ export interface IEventLogModel extends mongoose.Model<IEventLogDocument> {
   ) => Promise<IEventLogDocument>;
 }
 
-const eventLogSchemaFields: SchemaDefinition<IEventLog> = {
-  eventType: { type: String, required: true, enum: ['escrow', 'delivery', 'dispute'] },
-  transactionHash: { type: String, required: true },
-  ledgerSequence: { type: Number, required: true },
-  contractId: { type: String, required: false },
-  eventData: { type: Object as () => Record<string, unknown>, required: true, default: {} },
-  indexedAt: { type: Date, required: false },
-};
-
-const EventLogSchema = new mongoose.Schema<IEventLogDocument, IEventLogModel>(
-  eventLogSchemaFields,
-  {
-    timestamps: true,
-    toJSON: {
-      transform: (
-        _doc: IEventLogDocument,
-        ret: Record<string, unknown>,
-      ): Record<string, unknown> => {
-const EventLogSchema = new Schema<IEventLog, IEventLogModel>(
+const EventLogSchema = new Schema<IEventLogDocument, IEventLogModel>(
   {
     eventType: {
       type: String,

@@ -50,7 +50,9 @@ export const parseFeatureFlags = (
     }
   }
 
-  for (const [name, value] of Object.entries(overrides) as Array<[FeatureFlag, boolean | undefined]>) {
+  for (const [name, value] of Object.entries(overrides) as Array<
+    [FeatureFlag, boolean | undefined]
+  >) {
     if (value !== undefined) {
       flags[name] = value;
     }

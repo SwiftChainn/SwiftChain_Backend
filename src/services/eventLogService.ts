@@ -1,7 +1,7 @@
 import EventLog, { IEventLog, RecordBatchInput, RecordBatchResult } from '../models/EventLog';
 import { startTrackedSession } from '../config/database';
 import logger from '../config/logger';
-import type { SortOrder } from 'mongoose';
+import type { ClientSession, SortOrder } from 'mongoose';
 
 // --- Atomic batch ingestion -----------------------------------------------
 
@@ -33,8 +33,28 @@ export async function recordBatchWithCheckpoint(
   } finally {
     if (session) {
       session.endSession();
+    }
   }
+}
 
+/**
+ * Backward-compatible alias used by existing consumers that expect a single
+ * "record processed ledger" call. It records nothing new when the ledger has
+ * already been processed.
+ */
+export async function recordProcessedLedger(ledger: number): Promise<void> {
+  logger.info(`[EventLogService] recordProcessedLedger invoked for ledger ${ledger}`);
+  // No-op against the existing interface contract; the real work happens in
+  // recordBatchWithCheckpoint driven from the event poller.
+}
+
+// --- EventLogService class (kept for backward compatibility) ----------------
+
+/**
+ * Service class providing the legacy event-log API used by the controller and
+ * routes. New batch-ingestion paths use the standalone functions above.
+ */
+export class EventLogService {
   /**
    * Get all unprocessed events
    */
@@ -126,15 +146,23 @@ export async function recordBatchWithCheckpoint(
       return null;
     }
   }
+
+  /**
+   * Get the last processed ledger sequence
+   */
+  async getLastProcessedLedger(eventType?: string): Promise<number> {
+    try {
+      const last = await EventLog.findOne(
+        eventType ? { eventType, status: 'processed' } : { status: 'processed' },
+        { ledgerSequence: 1 },
+        { sort: { ledgerSequence: -1 } },
+      );
+      return last ? last.ledgerSequence : 0;
+    } catch (error) {
+      logger.error('Error getting last processed ledger:', error);
+      return 0;
+    }
+  }
 }
 
-/**
- * Backward-compatible alias used by existing consumers that expect a single
- * "record processed ledger" call. It records nothing new when the ledger has
- * already been processed.
- */
-export async function recordProcessedLedger(ledger: number): Promise<void> {
-  logger.info(`[EventLogService] recordProcessedLedger invoked for ledger ${ledger}`);
-  // No-op against the existing interface contract; the real work happens in
-  // recordBatchWithCheckpoint driven from the event poller.
-}
+export default new EventLogService();

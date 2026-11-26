@@ -15,9 +15,7 @@ import { WebhookDeliveryAttempt } from '../src/models/WebhookDeliveryAttempt';
 describe('feature-flag service gates', () => {
   it('does not query or create delivery pools when pooling is disabled', async () => {
     await expect(poolingService.createPools()).resolves.toEqual([]);
-    await expect(
-      poolingService.assignPoolToNearestDriver({} as DeliveryPool),
-    ).resolves.toEqual({
+    await expect(poolingService.assignPoolToNearestDriver({} as DeliveryPool)).resolves.toEqual({
       assigned: false,
       reason: 'Delivery pooling is disabled by feature flag',
     });
