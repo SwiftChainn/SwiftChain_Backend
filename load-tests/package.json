@@ -9,6 +9,7 @@
     "test:api:auth": "k6 run k6/scenarios/auth-load.js",
     "test:api:deliveries": "k6 run k6/scenarios/deliveries-load.js",
     "test:api": "npm run test:api:auth && npm run test:api:deliveries",
+    "test:indexer:soak": "pnpm --dir .. run build && node indexer-ingestion.js",
     "test:socket": "k6 run k6/scenarios/socket-load.js",
     "test:socket:10k": "SOCKET_LOAD_EMIT_INTERVAL_MS=3500 k6 run k6/scenarios/socket-load.js",
     "test:ws": "ts-node --project tsconfig.json socket-load/src/index.ts",

@@ -386,3 +386,24 @@ This PR includes:
 - Adjust ramp stages/thresholds based on observed infrastructure limits
 - Integrate metrics snapshots into CI/CD for regression detection
 
+## Indexer ingestion soak
+
+`indexer-ingestion.js` sends generated, paged contract events through the
+production `EventPoller` using a fake Soroban RPC client and a real MongoDB
+database. It reports events per second, p95 ingest latency, heap growth,
+high-water checkpoint lag, checkpoint convergence, and duplicate mutations.
+
+The target URI must name a dedicated database containing `soak`. The harness
+creates a unique database for each run and drops only that generated database.
+Configure `INDEXER_SOAK_MONGODB_URI` in this directory's `.env` file, then run
+from the repository root:
+
+```bash
+pnpm run build
+pnpm --dir load-tests run test:indexer:soak
+pnpm --dir load-tests run test:indexer:soak -- --events 5000
+```
+
+The default is 50,000 events. The Jest suite also runs a 5,000-event reduced
+variant against `MongoMemoryServer` in CI.
+

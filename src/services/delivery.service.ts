@@ -588,7 +588,7 @@ export const deliveryService = new DeliveryService();
 // full delivery surface; the controller and DI container now share one import.
 
 import QRCode from 'qrcode';
-import { generateQrToken } from '../utils/qrToken';
+import { generateQrToken, hashQrToken } from '../utils/qrToken';
 
 export interface HandoffQrCodeResult {
   /** Base64 PNG data URL of the QR code. */
@@ -622,8 +622,23 @@ class DeliveryServiceQrExtensions {
     }
 
     const token = generateQrToken(deliveryId);
-    const expiryMinutes = parseInt(process.env.QR_TOKEN_EXPIRY_MINUTES ?? '30', 10);
-    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+    const ttlSeconds = Number(process.env.QR_TOKEN_TTL_SECONDS ?? '1800');
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
+
+    const updated = await Delivery.findOneAndUpdate(
+      { _id: deliveryId, status: DeliveryStatus.IN_PROGRESS },
+      {
+        $set: {
+          handoffTokenHash: hashQrToken(token),
+          handoffTokenExpiresAt: expiresAt,
+          handoffTokenRegeneratedAt: new Date(),
+        },
+      },
+      { new: true, runValidators: true },
+    );
+    if (!updated) {
+      throw new AppError('Delivery handoff state changed during regeneration', httpStatus.CONFLICT);
+    }
 
     const qrData = JSON.stringify({
       deliveryId,

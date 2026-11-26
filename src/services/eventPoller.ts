@@ -158,6 +158,12 @@ export interface EventPollerOptions {
   subscriptions: EventSubscription[];
   intervalMs: number;
   pageSize: number;
+  /**
+   * Optional event source. When omitted the poller pages the RPC node itself;
+   * injecting a fetcher keeps the loop testable with fakes or lets another
+   * source feed the pipeline.
+   */
+  fetchNextEvents?: FetchNextEvents;
 }
 
 export interface PollCycleResult {
