@@ -7,8 +7,9 @@ export interface IEventLog extends Document {
   transactionHash: string;
   ledgerSequence: number;
   contractId?: string;
-  eventData: Record<string, unknown>;
-  indexedAt?: Date;
+  /** Content-addressed SHA-256 hash over (contractId, topic, payload) + ledgerContext (#336). */
+  eventHash?: string | null;
+  eventData?: Record<string, unknown>;
   processedAt: Date | null;
   status: 'pending' | 'processed' | 'failed';
   errorMessage?: string | null;
@@ -41,15 +42,48 @@ export interface IEventLogModel extends mongoose.Model<IEventLog> {
     checkpointLedger: number,
   ) => Promise<IEventLog>;
   eventExists(transactionHash: string, eventType: string): Promise<boolean>;
-  markAsProcessed(transactionHash: string, eventType: string): Promise<IEventLog | null>;
+  findByEventHash(eventHash: string): Promise<IEventLog | null>;
+  recordOrReplay(data: Partial<IEventLog>): Promise<{ event: IEventLog; replayed: boolean }>;
 }
 
 const EventLogSchema = new Schema<IEventLog, IEventLogModel>(
   {
     eventType: {
       type: String,
-      required: true,
-      enum: ['escrow', 'delivery', 'dispute', 'reputation', 'milestone'],
+      required: [true, 'Event type is required'],
+      enum: ['delivery', 'escrow', 'dispute', 'reputation', 'milestone'],
+      index: true,
+    },
+    transactionHash: {
+      type: String,
+      required: [true, 'Transaction hash is required'],
+      index: true,
+      trim: true,
+    },
+    ledgerSequence: {
+      type: Number,
+      required: [true, 'Ledger sequence is required'],
+      index: true,
+      min: [0, 'Ledger sequence must be a positive number'],
+    },
+    contractId: {
+      type: String,
+      index: true,
+      trim: true,
+      default: null,
+    },
+    eventHash: {
+      type: String,
+      trim: true,
+      default: undefined,
+    },
+    eventData: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    processedAt: {
+      type: Date,
+      default: null,
     },
     transactionHash: { type: String, required: true, trim: true },
     ledgerSequence: { type: Number, required: true },
@@ -72,10 +106,20 @@ const EventLogSchema = new Schema<IEventLog, IEventLogModel>(
   { timestamps: true, versionKey: false },
 );
 
-EventLogSchema.index(
-  { transactionHash: 1, eventType: 1 },
-  { unique: true, name: 'idx_event_log_transaction_hash_event_type' },
-);
+// Legacy compound index kept during the migration window (#336)
+EventLogSchema.index({ transactionHash: 1, eventType: 1 }, { unique: true });
+
+// Content-addressed unique event-hash index (sparse so legacy docs without eventHash coexist) (#336)
+EventLogSchema.index({ eventHash: 1 }, { unique: true, sparse: true });
+
+// Index for efficient querying of unprocessed events
+EventLogSchema.index({ status: 1, createdAt: 1 });
+
+// Index for the retry job: failed entries whose backoff window has elapsed
+EventLogSchema.index({ status: 1, nextRetryAt: 1 });
+
+// Index for ledger sequence range queries
+EventLogSchema.index({ ledgerSequence: 1, eventType: 1 });
 
 EventLogSchema.pre<IEventLog>('save', function (next) {
   this.updatedAt = new Date();
@@ -155,20 +199,63 @@ EventLogSchema.static(
   },
 );
 
+// Static method to look up an event by its content-addressed eventHash (#336)
 EventLogSchema.static(
-  'markAsProcessed',
-  async function markAsProcessed(
-    this: IEventLogModel,
-    transactionHash: string,
-    eventType: string,
-  ): Promise<IEventLog | null> {
-    return this.findOneAndUpdate(
-      { transactionHash, eventType },
-      { status: 'processed', processedAt: new Date() },
-      { new: true },
-    );
+  'findByEventHash',
+  async function (this: IEventLogModel, eventHash: string): Promise<IEventLog | null> {
+    return this.findOne({ eventHash });
   },
 );
+
+// Idempotent insert: returns the existing record on duplicate eventHash or legacy key collision (#336)
+EventLogSchema.static(
+  'recordOrReplay',
+  async function (
+    this: IEventLogModel,
+    data: Partial<IEventLog>,
+  ): Promise<{ event: IEventLog; replayed: boolean }> {
+    if (data.eventHash) {
+      const existingByHash = await this.findOne({ eventHash: data.eventHash });
+      if (existingByHash) {
+        return { event: existingByHash, replayed: true };
+      }
+    }
+
+    if (data.transactionHash && data.eventType) {
+      const existingByLegacy = await this.findOne({
+        transactionHash: data.transactionHash,
+        eventType: data.eventType,
+      });
+      if (existingByLegacy) {
+        return { event: existingByLegacy, replayed: true };
+      }
+    }
+
+    try {
+      const created = await this.create(data);
+      return { event: created, replayed: false };
+    } catch (error: unknown) {
+      const isDuplicate =
+        typeof error === 'object' && error !== null && (error as { code?: number }).code === 11000;
+      if (isDuplicate) {
+        const existing =
+          (data.eventHash ? await this.findOne({ eventHash: data.eventHash }) : null) ??
+          (data.transactionHash && data.eventType
+            ? await this.findOne({
+                transactionHash: data.transactionHash,
+                eventType: data.eventType,
+              })
+            : null);
+        if (existing) {
+          return { event: existing, replayed: true };
+        }
+      }
+      throw error;
+    }
+  },
+);
+
+const EventLog = mongoose.model<IEventLog, IEventLogModel>('EventLog', EventLogSchema);
 
 const EventLog = mongoose.model<IEventLog, IEventLogModel>('EventLog', EventLogSchema);
 export default EventLog;

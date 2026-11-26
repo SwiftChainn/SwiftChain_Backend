@@ -1855,91 +1855,14 @@ export const paths: swaggerJSDoc.Paths = {
       },
     },
   },
-  '/v1/eventlog/archives/run': {
-    post: {
-      tags: ['Indexer'],
-      summary: 'Archive processed events older than the retention window',
-      security: bearer,
-      requestBody: {
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              properties: {
-                retentionDays: {
-                  type: 'integer',
-                  minimum: 1,
-                },
-                batchSize: {
-                  type: 'integer',
-                  minimum: 1,
-                  maximum: 10000,
-                },
-                purge: {
-                  type: 'boolean',
-                },
-              },
-            },
-          },
-        },
-      },
-      responses: {
-        '200': {
-          description: 'Archive processed events older than the retention window',
-        },
-        '401': {
-          description: 'Authentication required',
-        },
-        '403': {
-          description: 'Insufficient role',
-        },
-      },
-    },
-  },
-  '/v1/eventlog/archives/manifests': {
+  '/v1/admin/explorer/transactions/{hash}': {
     get: {
-      tags: ['Indexer'],
-      summary: 'List cold-storage archive manifests',
+      tags: ['Admin'],
+      summary: 'Find events and entities correlated with a transaction',
       security: bearer,
       parameters: [
         {
-          name: 'page',
-          in: 'query',
-          required: false,
-          schema: {
-            type: 'integer',
-          },
-        },
-        {
-          name: 'limit',
-          in: 'query',
-          required: false,
-          schema: {
-            type: 'integer',
-          },
-        },
-      ],
-      responses: {
-        '200': {
-          description: 'List cold-storage archive manifests',
-        },
-        '401': {
-          description: 'Authentication required',
-        },
-        '403': {
-          description: 'Insufficient role',
-        },
-      },
-    },
-  },
-  '/v1/eventlog/archives/manifests/{id}/verify': {
-    get: {
-      tags: ['Indexer'],
-      summary: 'Verify the checksum and event count of an archive manifest',
-      security: bearer,
-      parameters: [
-        {
-          name: 'id',
+          name: 'hash',
           in: 'path',
           required: true,
           schema: {
@@ -1949,7 +1872,7 @@ export const paths: swaggerJSDoc.Paths = {
       ],
       responses: {
         '200': {
-          description: 'Verify the checksum and event count of an archive manifest',
+          description: 'Find events and entities correlated with a transaction',
         },
         '401': {
           description: 'Authentication required',
@@ -1957,22 +1880,19 @@ export const paths: swaggerJSDoc.Paths = {
         '403': {
           description: 'Insufficient role',
         },
-        '404': {
-          description: 'Manifest not found',
-        },
       },
     },
   },
-  '/v1/eventlog/archives/events': {
+  '/v1/admin/explorer/ledgers': {
     get: {
-      tags: ['Indexer'],
-      summary: 'Query archived events by ledger, contract or transaction',
+      tags: ['Admin'],
+      summary: 'Find event and entity correlations in a ledger range',
       security: bearer,
       parameters: [
         {
           name: 'startLedger',
           in: 'query',
-          required: false,
+          required: true,
           schema: {
             type: 'integer',
           },
@@ -1980,7 +1900,7 @@ export const paths: swaggerJSDoc.Paths = {
         {
           name: 'endLedger',
           in: 'query',
-          required: false,
+          required: true,
           schema: {
             type: 'integer',
           },
@@ -1993,40 +1913,110 @@ export const paths: swaggerJSDoc.Paths = {
             type: 'string',
           },
         },
-        {
-          name: 'contractId',
-          in: 'query',
-          required: false,
-          schema: {
-            type: 'string',
-          },
-        },
-        {
-          name: 'transactionHash',
-          in: 'query',
-          required: false,
-          schema: {
-            type: 'string',
-          },
-        },
-        {
-          name: 'includeHot',
-          in: 'query',
-          required: false,
-          schema: {
-            type: 'boolean',
-          },
-        },
       ],
       responses: {
         '200': {
-          description: 'Query archived events by ledger, contract or transaction',
+          description: 'Find event and entity correlations in a ledger range',
         },
         '401': {
           description: 'Authentication required',
         },
         '403': {
           description: 'Insufficient role',
+        },
+      },
+    },
+  },
+  '/v1/admin/explorer/entities/{entityType}/{entityId}': {
+    get: {
+      tags: ['Admin'],
+      summary: 'Find events that changed an entity',
+      security: bearer,
+      parameters: [
+        {
+          name: 'entityType',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+        {
+          name: 'entityId',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Find events that changed an entity',
+        },
+        '401': {
+          description: 'Authentication required',
+        },
+        '403': {
+          description: 'Insufficient role',
+        },
+      },
+    },
+  },
+  '/v1/eventlog/transaction/{hash}/correlations': {
+    get: {
+      tags: ['Indexer'],
+      summary: 'Look up entity correlations for a transaction',
+      security: bearer,
+      parameters: [
+        {
+          name: 'hash',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Look up entity correlations for a transaction',
+        },
+        '401': {
+          description: 'Authentication required',
+        },
+      },
+    },
+  },
+  '/v1/eventlog/entity/{entityType}/{entityId}': {
+    get: {
+      tags: ['Indexer'],
+      summary: 'Look up on-chain events for an entity',
+      security: bearer,
+      parameters: [
+        {
+          name: 'entityType',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+        {
+          name: 'entityId',
+          in: 'path',
+          required: true,
+          schema: {
+            type: 'string',
+          },
+        },
+      ],
+      responses: {
+        '200': {
+          description: 'Look up on-chain events for an entity',
+        },
+        '401': {
+          description: 'Authentication required',
         },
       },
     },

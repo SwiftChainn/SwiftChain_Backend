@@ -433,6 +433,18 @@ router.get('/eventlog/failed', eventLogController.getFailedEvents.bind(eventLogC
  */
 router.post('/eventlog/:id/retry', eventLogController.retryFailedEvent.bind(eventLogController));
 
-router.get('/handoff-audit', listHandoffAudit);
+// Admin explorer correlation APIs (#334)
+router.get(
+  '/explorer/transactions/:hash',
+  eventLogController.getCorrelationsByTx.bind(eventLogController),
+);
+router.get(
+  '/explorer/ledgers',
+  eventLogController.getCorrelationsByLedgerRange.bind(eventLogController),
+);
+router.get(
+  '/explorer/entities/:entityType/:entityId',
+  eventLogController.getEventsForEntity.bind(eventLogController),
+);
 
 export default router;

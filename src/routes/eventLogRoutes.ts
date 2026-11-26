@@ -40,29 +40,16 @@ router.get(
   eventLogController.getEventByTransactionHash.bind(eventLogController),
 );
 
-// Cold-storage event archiving routes
-router.post(
-  '/archives/run',
-  requireRole(UserRole.ADMIN),
-  eventArchiveController.runArchive.bind(eventArchiveController),
+// Get correlated off-chain entities and events for a transaction hash (#334)
+router.get(
+  '/transaction/:hash/correlations',
+  eventLogController.getCorrelationsByTx.bind(eventLogController),
 );
 
+// Get all on-chain events that mutated a specific off-chain entity (#334)
 router.get(
-  '/archives/manifests',
-  requireRole(UserRole.ADMIN, UserRole.ENTERPRISE),
-  eventArchiveController.listManifests.bind(eventArchiveController),
-);
-
-router.get(
-  '/archives/manifests/:id/verify',
-  requireRole(UserRole.ADMIN, UserRole.ENTERPRISE),
-  eventArchiveController.verifyManifest.bind(eventArchiveController),
-);
-
-router.get(
-  '/archives/events',
-  requireRole(UserRole.ADMIN, UserRole.ENTERPRISE),
-  eventArchiveController.getArchivedEvents.bind(eventArchiveController),
+  '/entity/:entityType/:entityId',
+  eventLogController.getEventsForEntity.bind(eventLogController),
 );
 
 export default router;

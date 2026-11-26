@@ -2,6 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import { StatusCodes } from 'http-status-codes';
 import eventLogService from '../services/eventLogService';
 import { eventLogRetryService } from '../services/eventLogRetryService';
+import {
+  eventCorrelationService,
+  isValidCorrelatedEntityType,
+} from '../services/eventCorrelationService';
 import { sendSuccess, sendError } from '../utils/responseWrapper';
 import logger from '../config/logger';
 import { resolveQueryOptions, buildPaginationMeta } from '../middlewares/queryMiddleware';
@@ -142,6 +146,94 @@ export class EventLogController {
       sendSuccess(res, { outcome, event }, message, StatusCodes.OK);
     } catch (error) {
       logger.error('Error in retryFailedEvent:', error);
+      next(error);
+    }
+  }
+  /**
+   * Resolve a transaction hash to its correlated off-chain entities and events (#334)
+   * GET /api/v1/eventlog/transaction/:hash/correlations
+   * GET /api/v1/admin/explorer/transactions/:hash
+   */
+  async getCorrelationsByTx(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { hash } = req.params;
+      if (!hash || !hash.trim()) {
+        sendError(res, 'Transaction hash is required', StatusCodes.BAD_REQUEST);
+        return;
+      }
+      const result = await eventCorrelationService.getEntitiesForTx(hash);
+      sendSuccess(res, result, 'Transaction correlations retrieved successfully', StatusCodes.OK);
+    } catch (error) {
+      logger.error('Error in getCorrelationsByTx:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Resolve an off-chain entity to the on-chain events that mutated it (#334)
+   * GET /api/v1/eventlog/entity/:entityType/:entityId
+   * GET /api/v1/admin/explorer/entities/:entityType/:entityId
+   */
+  async getEventsForEntity(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { entityType, entityId } = req.params;
+      if (!isValidCorrelatedEntityType(entityType)) {
+        sendError(
+          res,
+          `Invalid entityType '${entityType}'. Expected one of: delivery, escrow, dispute, reputation, milestone`,
+          StatusCodes.BAD_REQUEST,
+        );
+        return;
+      }
+      if (!entityId || !entityId.trim()) {
+        sendError(res, 'entityId is required', StatusCodes.BAD_REQUEST);
+        return;
+      }
+      const result = await eventCorrelationService.getEventsForEntity(entityType, entityId);
+      sendSuccess(res, result, 'Entity events retrieved successfully', StatusCodes.OK);
+    } catch (error) {
+      logger.error('Error in getEventsForEntity:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * Resolve a ledger range to correlated off-chain entities and events (#334)
+   * GET /api/v1/admin/explorer/ledgers?startLedger=&endLedger=&eventType=
+   */
+  async getCorrelationsByLedgerRange(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const { startLedger, endLedger, eventType } = req.query;
+      if (!startLedger || !endLedger) {
+        sendError(res, 'startLedger and endLedger are required', StatusCodes.BAD_REQUEST);
+        return;
+      }
+      const start = parseInt(String(startLedger), 10);
+      const end = parseInt(String(endLedger), 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+        sendError(res, 'Invalid ledger range', StatusCodes.BAD_REQUEST);
+        return;
+      }
+      if (eventType && !isValidCorrelatedEntityType(String(eventType))) {
+        sendError(res, `Invalid eventType '${String(eventType)}'`, StatusCodes.BAD_REQUEST);
+        return;
+      }
+      const result = await eventCorrelationService.getEntitiesForLedgerRange(
+        start,
+        end,
+        eventType
+          ? (String(eventType) as Parameters<
+              typeof eventCorrelationService.getEntitiesForLedgerRange
+            >[2])
+          : undefined,
+      );
+      sendSuccess(res, result, 'Ledger range correlations retrieved successfully', StatusCodes.OK);
+    } catch (error) {
+      logger.error('Error in getCorrelationsByLedgerRange:', error);
       next(error);
     }
   }
