@@ -56,8 +56,13 @@ export interface EventPollerOptions {
   network: string;
   contractId: string;
   subscriptions: EventSubscription[];
-  /** Milliseconds between poll cycles. */
+  /** Base milliseconds between poll cycles. Each tick is jittered by ±(jitterRatio × intervalMs). */
   intervalMs: number;
+  /**
+   * Half-width of the jitter window as a fraction of `intervalMs`. Range 0–0.5.
+   * Defaults to 0.2 when omitted (±20 % of base interval).
+   */
+  jitterRatio?: number;
   /** Events requested per `getEvents` page. */
   pageSize: number;
   /**
@@ -98,10 +103,34 @@ export interface EventReplayer {
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const DEFAULT_PAGE_SIZE = 100;
+const DEFAULT_JITTER_RATIO = 0.2;
 const DUPLICATE_KEY_ERROR_CODE = 11000;
 
 /** Topic filter key as the RPC node expects it: the base64 XDR of the symbol. */
 const topicKey = (topic: string): string => xdr.ScVal.scvSymbol(topic).toXDR('base64');
+
+// ─── Jitter ────────────────────────────────────────────────────────────────────
+
+/**
+ * Return a randomised delay around `baseMs` to prevent multiple poller
+ * instances from bursting into the RPC node at the same wall-clock moment.
+ *
+ * The effective interval is drawn uniformly from
+ *   [base × (1 − ratio), base × (1 + ratio)]
+ *
+ * A ratio of 0 returns `baseMs` unchanged (no jitter).
+ * A ratio of 0.2 spreads the window over ±20 % of the base interval.
+ *
+ * @param baseMs    Base poll interval in milliseconds.
+ * @param ratio     Half-width of the jitter window as a fraction of `baseMs`.
+ *                  Clamped to [0, 0.5].
+ */
+export const computeJitteredInterval = (baseMs: number, ratio: number): number => {
+  const clampedRatio = Math.min(Math.max(ratio, 0), 0.5);
+  if (clampedRatio === 0) return baseMs;
+  const halfWindow = baseMs * clampedRatio;
+  return Math.round(baseMs + (Math.random() * 2 - 1) * halfWindow);
+};
 
 const isDuplicateKeyError = (error: unknown): boolean =>
   typeof error === 'object' &&
@@ -114,7 +143,8 @@ export class EventPoller implements EventReplayer {
   private readonly options: EventPollerOptions;
   private readonly subscriptionsByTopic: Map<string, EventSubscription>;
   private readonly filters: SorobanGetEventsRequest['filters'];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
   private inFlight: Promise<void> | null = null;
 
   constructor(options: EventPollerOptions) {
@@ -129,24 +159,36 @@ export class EventPoller implements EventReplayer {
     }));
   }
 
-  /** Whether cycles are currently being scheduled. */
-  get isRunning(): boolean {
-    return this.timer !== null;
-  }
-
-  /** Begin polling on the configured interval. Idempotent. */
+  /** Begin polling. Each tick schedules the next with fresh jitter. Idempotent. */
   start(): void {
-    if (this.timer) return;
-    this.timer = setInterval(() => {
-      void this.runCycle();
-    }, this.options.intervalMs);
-    void this.runCycle();
+    if (this.timer !== null) return;
+    this.stopped = false;
+    this.scheduleTick(0);
   }
 
   /** Stop scheduling new cycles. A cycle already in flight runs to completion. */
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+  }
+
+  /**
+   * Schedule one poll tick after `delayMs` milliseconds. After the cycle
+   * completes, the next tick is queued with a freshly randomised delay so
+   * instances naturally de-synchronise over time.
+   */
+  private scheduleTick(delayMs: number): void {
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.runCycle().then(() => {
+        if (!this.stopped) {
+          const jitterRatio = this.options.jitterRatio ?? DEFAULT_JITTER_RATIO;
+          const next = computeJitteredInterval(this.options.intervalMs, jitterRatio);
+          this.scheduleTick(next);
+        }
+      });
+    }, delayMs);
   }
 
   /**
@@ -380,7 +422,8 @@ const createDefaultPoller = (): EventPoller => {
         handle: (event) => handleEscrowFundedEvent(event, contractId),
       },
     ],
-    intervalMs: DEFAULT_INTERVAL_MS,
+    intervalMs: env.INDEXER_POLL_INTERVAL_MS,
+    jitterRatio: env.INDEXER_POLL_JITTER_RATIO,
     pageSize: DEFAULT_PAGE_SIZE,
   });
 };
@@ -397,7 +440,10 @@ export const startEventPoller = (): void => {
   activePoller.start();
   logger.info(
     `[EventPoller] Started — network=${env.STELLAR_NETWORK} contract=${escrowIndexerConfig.contractId} ` +
-      `topic=${escrowIndexerConfig.fundedEventTopic}`,
+      `topic=${escrowIndexerConfig.fundedEventTopic} ` +
+      `baseIntervalMs=${env.INDEXER_POLL_INTERVAL_MS} jitterRatio=${env.INDEXER_POLL_JITTER_RATIO} ` +
+      `effectiveRangeMs=[${Math.round(env.INDEXER_POLL_INTERVAL_MS * (1 - env.INDEXER_POLL_JITTER_RATIO))},` +
+      `${Math.round(env.INDEXER_POLL_INTERVAL_MS * (1 + env.INDEXER_POLL_JITTER_RATIO))}]`,
   );
 };
 

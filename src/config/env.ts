@@ -165,6 +165,19 @@ interface EnvConfig {
   ESCROW_CONTRACT_ID: string;
   /** Event topic the escrow indexer filters on. Default: escrow_funded */
   ESCROW_FUNDED_EVENT_TOPIC: string;
+  /**
+   * Base interval (ms) between event-poller ticks. Actual tick spacing is
+   * randomised by ±(INDEXER_POLL_JITTER_RATIO × interval) to de-synchronise
+   * multiple instances hitting the same RPC node. Range 1000–300000.
+   * Default: 10000 (10 s — aggressive for dev; raise to ≥30000 in prod).
+   */
+  INDEXER_POLL_INTERVAL_MS: number;
+  /**
+   * Fraction of the base interval used as the half-width of the jitter window.
+   * A ratio of 0.2 means each tick fires at base ± 20 % of base.
+   * Range 0–0.5. Default: 0.2.
+   */
+  INDEXER_POLL_JITTER_RATIO: number;
 
   // ── Logging ───────────────────────────────────────────────────
   /** Directory for rotating log files. Default: logs */
@@ -418,6 +431,8 @@ const envSchema = z.object({
   // ── Escrow indexer ─────────────────────────────────────────────────────────
   ESCROW_CONTRACT_ID: z.string().trim().default(''),
   ESCROW_FUNDED_EVENT_TOPIC: z.string().trim().min(1).default('escrow_funded'),
+  INDEXER_POLL_INTERVAL_MS: numeric(z.coerce.number().int().min(1000).max(300000).default(10000)),
+  INDEXER_POLL_JITTER_RATIO: numeric(z.coerce.number().min(0).max(0.5).default(0.2)),
 
   // ── Logging ───────────────────────────────────────────────────
   LOG_DIR: z.string().trim().min(1).default('logs'),
