@@ -9,7 +9,7 @@
  */
 
 import axios from 'axios';
-import type { Transaction, FeeBumpTransaction, rpc as StellarRpc } from '@stellar/stellar-sdk';
+import type { Transaction, FeeBumpTransaction, rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
 import { sorobanRpcClient } from '../../config/stellar';
 import type { Coordinates, ETARequest, ETAResponse, IRoutingProvider } from './routingProvider';
 import type {
@@ -17,6 +17,7 @@ import type {
   PreparedTransaction,
   SorobanGetEventsRequest,
 } from './sorobanRpcClient';
+import { FailoverSorobanRpcClient } from './failoverSorobanRpcClient';
 
 // ─── Google Maps routing adapter ──────────────────────────────────────────────
 
@@ -195,6 +196,10 @@ export class SdkSorobanRpcClient implements ISorobanRpcClient {
     return this.server.getEvents(request);
   }
 
+  getLedgerEntries(...keys: xdr.LedgerKey[]) {
+    return this.server.getLedgerEntries(...keys);
+  }
+
   getLatestLedger() {
     return this.server.getLatestLedger();
   }
@@ -210,7 +215,32 @@ export class SdkSorobanRpcClient implements ISorobanRpcClient {
   sendTransaction(tx: Transaction | FeeBumpTransaction) {
     return this.server.sendTransaction(tx);
   }
+
+  async getContractData(
+    contractId: string,
+    key: xdr.ScVal,
+    durability?: StellarRpc.Durability,
+  ): Promise<StellarRpc.Api.LedgerEntryResult | null> {
+    try {
+      return await this.server.getContractData(contractId, key, durability);
+    } catch {
+      return null;
+    }
+  }
 }
 
-/** Shared adapter instance wrapping the configured default `rpc.Server`. */
-export const defaultSorobanRpcClient: ISorobanRpcClient = new SdkSorobanRpcClient();
+/** Shared failover client used by production services and the indexer. */
+const configuredRpcUrls = stellarConfig.rpcUrls ?? [stellarConfig.rpcUrl];
+export const defaultSorobanRpcClient: ISorobanRpcClient = new FailoverSorobanRpcClient(
+  configuredRpcUrls.map((url) => ({
+    url,
+    client: new SdkSorobanRpcClient(
+      url === stellarConfig.rpcUrl ? sorobanRpcClient : createSorobanRpcClientForUrl(url),
+    ),
+  })),
+  {
+    primaryUrl: stellarConfig.rpcUrl,
+    quarantineMs: stellarConfig.rpcQuarantineMs ?? 30_000,
+    probeTimeoutMs: stellarConfig.timeoutMs,
+  },
+);

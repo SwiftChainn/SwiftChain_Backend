@@ -169,11 +169,11 @@ describe('generateQrToken / verifyQrToken utilities', () => {
 
   it('rejects expired token', () => {
     // Temporarily set short expiry
-    process.env.QR_TOKEN_EXPIRY_MINUTES = '0';
-    const token = generateQrToken(testDeliveryId);
+    process.env.QR_TOKEN_TTL_SECONDS = '1';
+    const token = generateQrToken(testDeliveryId, Date.now() - 2000);
     // Token expires immediately
     expect(() => verifyQrToken(token)).toThrow(/expired/);
-    delete process.env.QR_TOKEN_EXPIRY_MINUTES;
+    delete process.env.QR_TOKEN_TTL_SECONDS;
   });
 
   it('rejects empty token', () => {

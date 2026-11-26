@@ -13,6 +13,7 @@ import { UserRole } from '../interfaces/IUser';
 import { estimateFeeSchema } from '../validators/pricingValidator';
 import { pricingController } from '../controllers/pricingController';
 import { buildQueryOptions } from '../middlewares/queryMiddleware';
+import { verifyHandoffQr } from '../controllers/handoffController';
 
 /** Shared query contract for the delivery list endpoints (docs/query-contract.md). */
 const deliveryListQuery = buildQueryOptions({
@@ -403,5 +404,7 @@ router.get(
   authenticate,
   deliveryController.generateHandoffQrCode.bind(deliveryController),
 );
+
+router.post('/:id/handoff/verify', authenticate, verifyHandoffQr);
 
 export default router;

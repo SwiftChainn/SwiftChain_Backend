@@ -1,25 +1,71 @@
-import EventLog, { IEventLog } from '../models/EventLog';
+import EventLog, { IEventLog, RecordBatchInput, RecordBatchResult } from '../models/EventLog';
+import { startTrackedSession } from '../config/database';
 import logger from '../config/logger';
-import type { SortOrder } from 'mongoose';
+import type { ClientSession, SortOrder } from 'mongoose';
+
+export async function recordBatchWithCheckpoint(
+  events: RecordBatchInput,
+  checkpointLedger: number,
+): Promise<RecordBatchResult> {
+  const mongooseDocEvents = events.map((event) =>
+    event instanceof EventLog ? event : new EventLog(event as IEventLog),
+  );
+  let session: ClientSession | null = null;
+  let sessionStarted = false;
+  try {
+    session = await startTrackedSession();
+    sessionStarted = true;
+    await EventLog.recordBatchWithCheckpoint(mongooseDocEvents, checkpointLedger);
+    return { inserted: mongooseDocEvents.map((e) => e.toObject() as IEventLog), checkpointLedger };
+  } catch (error) {
+    if (sessionStarted && session) {
+      await session.abortTransaction();
+    }
+    throw error;
+  } finally {
+    if (session) {
+      session.endSession();
+    }
+  }
+}
+
+export async function recordProcessedLedger(ledger: number): Promise<void> {
+  logger.info(`[EventLogService] recordProcessedLedger invoked for ledger ${ledger}`);
+}
 
 export class EventLogService {
-  /**
-   * Create a new event log entry
-   */
-  async createEventLog(eventData: Partial<IEventLog>): Promise<IEventLog> {
+  async createEventLog(eventData: {
+    eventType: string;
+    transactionHash: string;
+    ledgerSequence: number;
+    contractId?: string;
+    eventData?: Record<string, unknown>;
+    status?: string;
+  }): Promise<IEventLog> {
     try {
-      // Check if event already exists
-      if (eventData.transactionHash && eventData.eventType) {
-        const exists = await EventLog.eventExists(eventData.transactionHash, eventData.eventType);
-        if (exists) {
-          throw new Error('Event already exists');
-        }
+      const existing = await EventLog.findOne({
+        transactionHash: eventData.transactionHash,
+        eventType: eventData.eventType,
+      });
+      if (existing) {
+        throw new Error('Event already exists');
       }
-
-      const eventLog = new EventLog(eventData);
-      await eventLog.save();
-      logger.info(`Event log created: ${eventLog.id} for transaction ${eventLog.transactionHash}`);
-      return eventLog;
+      const event = new EventLog({
+        eventType: eventData.eventType,
+        transactionHash: eventData.transactionHash,
+        ledgerSequence: eventData.ledgerSequence,
+        contractId: eventData.contractId,
+        eventData: eventData.eventData ?? {},
+        status: eventData.status ?? 'pending',
+        processedAt: null,
+        errorMessage: null,
+        retries: 0,
+        lastError: null,
+        nextRetryAt: null,
+        deadLetteredAt: null,
+      });
+      await event.save();
+      return event;
     } catch (error) {
       logger.error('Error creating event log:', error);
       throw error;
@@ -64,32 +110,21 @@ export class EventLogService {
    */
   async markAsProcessed(transactionHash: string, eventType: string): Promise<IEventLog | null> {
     try {
-      const updated = await EventLog.markAsProcessed(transactionHash, eventType);
-      if (updated) {
-        logger.info(`Event marked as processed: ${updated.id}`);
+      const filter: Record<string, unknown> = { transactionHash };
+      if (eventType) {
+        filter.eventType = eventType;
       }
-      return updated;
+      return await EventLog.findOneAndUpdate(
+        filter,
+        { status: 'processed', processedAt: new Date() },
+        { new: true },
+      );
     } catch (error) {
       logger.error('Error marking event as processed:', error);
-      throw error;
+      return null;
     }
   }
 
-  /**
-   * Get the last processed ledger sequence
-   */
-  async getLastProcessedLedger(eventType?: string): Promise<number> {
-    try {
-      return await EventLog.getLastProcessedLedger(eventType);
-    } catch (error) {
-      logger.error('Error getting last processed ledger:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * Get all unprocessed events
-   */
   async getUnprocessedEvents(
     page = 1,
     limit = 20,
@@ -106,12 +141,10 @@ export class EventLogService {
       const safeLimit = Math.min(Math.max(1, limit), 100);
       const query = { status: 'pending' };
       const skip = (safePage - 1) * safeLimit;
-
       const [data, total] = await Promise.all([
         EventLog.find(query).sort(sort).skip(skip).limit(safeLimit),
         EventLog.countDocuments(query),
       ]);
-
       return {
         data,
         total,
@@ -125,9 +158,6 @@ export class EventLogService {
     }
   }
 
-  /**
-   * Get events by ledger sequence range
-   */
   async getEventsByLedgerRange(
     startLedger: number,
     endLedger: number,
@@ -147,9 +177,6 @@ export class EventLogService {
     }
   }
 
-  /**
-   * Get event by transaction hash
-   */
   async getEventByTransactionHash(transactionHash: string): Promise<IEventLog | null> {
     try {
       return await EventLog.findOne({ transactionHash });
@@ -159,9 +186,6 @@ export class EventLogService {
     }
   }
 
-  /**
-   * Update event status with error
-   */
   async markEventFailed(eventId: string, errorMessage: string): Promise<IEventLog | null> {
     try {
       const event = await EventLog.findByIdAndUpdate(
@@ -176,6 +200,20 @@ export class EventLogService {
     } catch (error) {
       logger.error('Error marking event as failed:', error);
       return null;
+    }
+  }
+
+  async getLastProcessedLedger(eventType?: string): Promise<number> {
+    try {
+      const last = await EventLog.findOne(
+        eventType ? { eventType, status: 'processed' } : { status: 'processed' },
+        { ledgerSequence: 1 },
+        { sort: { ledgerSequence: -1 } },
+      );
+      return last ? last.ledgerSequence : 0;
+    } catch (error) {
+      logger.error('Error getting last processed ledger:', error);
+      return 0;
     }
   }
 }

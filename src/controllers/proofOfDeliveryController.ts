@@ -35,6 +35,8 @@ export const uploadProofOfDeliveryHandler = async (
       mimeType: file.mimetype,
       buffer: file.buffer,
       sizeBytes: file.size,
+      latitude: req.body?.latitude === undefined ? undefined : Number(req.body.latitude),
+      longitude: req.body?.longitude === undefined ? undefined : Number(req.body.longitude),
     });
 
     sendSuccess(res, { delivery }, 'Proof of delivery uploaded successfully.', StatusCodes.CREATED);

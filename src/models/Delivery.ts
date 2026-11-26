@@ -42,6 +42,10 @@ export interface IDelivery extends Document {
   estimatedDuration?: number;
   actualDuration?: number;
   proofOfDelivery?: IProofOfDelivery;
+  handoffTokenHash?: string;
+  handoffTokenExpiresAt?: Date;
+  handoffTokenRegeneratedAt?: Date;
+  handoffTokenUsedAt?: Date;
   isDeleted?: boolean;
   deletedAt?: Date | null;
   deletedBy?: string;
@@ -94,6 +98,13 @@ export interface IProofOfDelivery {
   /** User id (string) of the driver who uploaded the proof. */
   uploadedBy: string;
   uploadedAt: Date;
+  contentHash: string;
+  signedPayload?: {
+    payload: Record<string, unknown>;
+    canonicalPayload: string;
+    signature: string;
+    signedAt: Date;
+  };
 }
 
 const DeliverySchema = new Schema<IDelivery>(
@@ -136,6 +147,10 @@ const DeliverySchema = new Schema<IDelivery>(
     estimatedDuration: { type: Number },
     actualDuration: { type: Number },
     proofOfDelivery: { type: Schema.Types.Mixed },
+    handoffTokenHash: { type: String, select: false },
+    handoffTokenExpiresAt: { type: Date, select: false },
+    handoffTokenRegeneratedAt: { type: Date, select: false },
+    handoffTokenUsedAt: { type: Date, select: false },
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
     deletedBy: { type: String },

@@ -17,6 +17,7 @@ import type {
   FeeBumpTransaction,
   Transaction,
   rpc as StellarRpc,
+  xdr,
 } from '@stellar/stellar-sdk';
 
 /** Request shape for contract-event queries (`rpc.Server.GetEventsRequest`). */
@@ -38,6 +39,8 @@ export interface ISorobanRpcClient {
   getTransaction(hash: string): Promise<StellarRpc.Api.GetTransactionResponse>;
   /** Query contract events emitted from a ledger onwards. */
   getEvents(request: SorobanGetEventsRequest): Promise<StellarRpc.Api.GetEventsResponse>;
+  /** Read a ledger entry by its XDR key. Optional for RPC test doubles that do not read state. */
+  getLedgerEntries?(...keys: xdr.LedgerKey[]): Promise<StellarRpc.Api.GetLedgerEntriesResponse>;
   /** Header metadata for the newest ledger on the network. */
   getLatestLedger(): Promise<StellarRpc.Api.GetLatestLedgerResponse>;
   /** Metadata (passphrase, protocol version) of the connected network. */
@@ -48,4 +51,13 @@ export interface ISorobanRpcClient {
   sendTransaction(
     tx: Transaction | FeeBumpTransaction,
   ): Promise<StellarRpc.Api.SendTransactionResponse>;
+  /**
+   * Read a contract data ledger entry (e.g. a `version` metadata key).
+   * Optional so existing test fakes that do not exercise ABI checks remain compatible.
+   */
+  getContractData?(
+    contractId: string,
+    key: import('@stellar/stellar-sdk').xdr.ScVal,
+    durability?: StellarRpc.Durability,
+  ): Promise<StellarRpc.Api.LedgerEntryResult | null>;
 }

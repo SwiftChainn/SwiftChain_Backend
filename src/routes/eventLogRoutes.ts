@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import eventLogController from '../controllers/eventLogController';
+import { eventArchiveController } from '../controllers/eventArchiveController';
 import authenticate from '../middleware/authenticate';
 import requireRole from '../middleware/requireRole';
 import { UserRole } from '../interfaces/IUser';

@@ -1,7 +1,9 @@
-import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
+import { startTrackedSession } from '../config/database';
+import logger from '../config/logger';
 
 export interface IEventLog extends Document {
-  eventType: string;
+  eventType: 'escrow' | 'delivery' | string;
   transactionHash: string;
   ledgerSequence: number;
   contractId?: string;
@@ -11,22 +13,34 @@ export interface IEventLog extends Document {
   processedAt: Date | null;
   status: 'pending' | 'processed' | 'failed';
   errorMessage?: string | null;
-  /** Retry attempts made after the initial failure (manual and scheduled). */
   retries: number;
-  /** Error from the most recent failed attempt, initial or retry. */
   lastError?: string | null;
-  /** When the retry job may next pick this entry up; null when none is scheduled. */
   nextRetryAt?: Date | null;
-  /** Set once retries are exhausted and the entry is escalated to the DLQ. */
   deadLetteredAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-// Define static methods interface
-interface IEventLogModel extends Model<IEventLog> {
-  markAsProcessed(transactionHash: string, eventType: string): Promise<IEventLog | null>;
-  getLastProcessedLedger(eventType?: string): Promise<number>;
+export type RecordBatchInput = IEventLog[];
+export type RecordBatchResult = {
+  inserted: IEventLog[];
+  checkpointLedger: number;
+};
+
+export interface IEventLogModel extends mongoose.Model<IEventLog> {
+  recordBatchWithCheckpoint: (
+    this: IEventLogModel,
+    events: RecordBatchInput,
+    checkpointLedger: number,
+  ) => Promise<RecordBatchResult>;
+  recordEventWithCheckpointFallback: (
+    this: IEventLogModel,
+    event: Pick<
+      IEventLog,
+      'eventType' | 'transactionHash' | 'ledgerSequence' | 'contractId' | 'eventData'
+    >,
+    checkpointLedger: number,
+  ) => Promise<IEventLog>;
   eventExists(transactionHash: string, eventType: string): Promise<boolean>;
   findByEventHash(eventHash: string): Promise<IEventLog | null>;
   recordOrReplay(data: Partial<IEventLog>): Promise<{ event: IEventLog; replayed: boolean }>;
@@ -71,48 +85,25 @@ const EventLogSchema = new Schema<IEventLog, IEventLogModel>(
       type: Date,
       default: null,
     },
+    transactionHash: { type: String, required: true, trim: true },
+    ledgerSequence: { type: Number, required: true },
+    contractId: { type: String, required: false },
+    eventData: { type: mongoose.Schema.Types.Mixed, required: true, default: {} },
+    indexedAt: { type: Date, required: false },
+    processedAt: { type: Date, required: true, default: null },
     status: {
       type: String,
-      required: [true, 'Status is required'],
+      required: true,
       enum: ['pending', 'processed', 'failed'],
       default: 'pending',
-      index: true,
     },
-    errorMessage: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    retries: {
-      type: Number,
-      default: 0,
-      min: [0, 'Retries cannot be negative'],
-    },
-    lastError: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    nextRetryAt: {
-      type: Date,
-      default: null,
-    },
-    deadLetteredAt: {
-      type: Date,
-      default: null,
-    },
+    errorMessage: { type: String, required: false, default: null },
+    retries: { type: Number, required: true, default: 0 },
+    lastError: { type: String, required: false, default: null },
+    nextRetryAt: { type: Date, required: false, default: null },
+    deadLetteredAt: { type: Date, required: false, default: null },
   },
-  {
-    timestamps: true,
-    toJSON: {
-      transform: (_doc: unknown, ret: Record<string, unknown>): Record<string, unknown> => {
-        ret.id = ret._id;
-        delete ret._id;
-        delete ret.__v;
-        return ret;
-      },
-    },
-  },
+  { timestamps: true, versionKey: false },
 );
 
 // Legacy compound index kept during the migration window (#336)
@@ -130,50 +121,81 @@ EventLogSchema.index({ status: 1, nextRetryAt: 1 });
 // Index for ledger sequence range queries
 EventLogSchema.index({ ledgerSequence: 1, eventType: 1 });
 
-// Pre-save middleware to set processedAt if status is processed
 EventLogSchema.pre<IEventLog>('save', function (next) {
-  if (this.status === 'processed' && !this.processedAt) {
-    this.processedAt = new Date();
-  }
+  this.updatedAt = new Date();
   next();
 });
 
-// Static method to mark events as processed
 EventLogSchema.static(
-  'markAsProcessed',
-  async function (
+  'recordBatchWithCheckpoint',
+  async function recordBatchWithCheckpoint(
     this: IEventLogModel,
-    transactionHash: string,
-    eventType: string,
-  ): Promise<IEventLog | null> {
-    return this.findOneAndUpdate(
-      { transactionHash, eventType },
-      { status: 'processed', processedAt: new Date() },
-      { new: true },
+    events: RecordBatchInput,
+    checkpointLedger: number,
+  ): Promise<RecordBatchResult> {
+    const mongooseDocEvents = events.map((event) =>
+      event instanceof mongoose.Document ? (event as IEventLog) : (event as IEventLog),
     );
+    const session = await startTrackedSession();
+    const inserted: IEventLog[] = [];
+    try {
+      for (const event of mongooseDocEvents) {
+        const createdDocs = await this.create([event], { session });
+        inserted.push(createdDocs[0].toObject() as IEventLog);
+      }
+      await this.db.collection('indexer_statuses').updateOne(
+        { network: 'main' },
+        {
+          $set: { lastProcessedLedger: checkpointLedger, lastProcessedAt: new Date() },
+          $setOnInsert: { network: 'main', createdAt: new Date(), updatedAt: new Date() },
+        },
+        { session, upsert: true },
+      );
+      logger.info(
+        `[EventLog] Batch of ${inserted.length} events persisted and checkpoint advanced to ledger ${checkpointLedger}`,
+      );
+      return { inserted: inserted.map((e) => e.toObject() as IEventLog), checkpointLedger };
+    } catch (error) {
+      logger.error('[EventLog] Failed to record batch with checkpoint:', error);
+      throw error;
+    } finally {
+      await session.endSession();
+    }
   },
 );
 
-// Static method to get the last processed ledger sequence
 EventLogSchema.static(
-  'getLastProcessedLedger',
-  async function (this: IEventLogModel, eventType?: string): Promise<number> {
-    const query = eventType ? { eventType, status: 'processed' } : { status: 'processed' };
-    const lastEvent = await this.findOne(query).sort({ ledgerSequence: -1 }).limit(1);
-    return lastEvent?.ledgerSequence || 0;
+  'recordEventWithCheckpointFallback',
+  async function recordEventWithCheckpointFallback(
+    this: IEventLogModel,
+    event: Pick<
+      IEventLog,
+      'eventType' | 'transactionHash' | 'ledgerSequence' | 'contractId' | 'eventData'
+    >,
+    checkpointLedger: number,
+  ): Promise<IEventLog> {
+    const created = await this.create(event as IEventLog);
+    await this.db.collection('indexer_statuses').updateOne(
+      { network: 'main' },
+      {
+        $set: { lastProcessedLedger: checkpointLedger, lastProcessedAt: new Date() },
+        $setOnInsert: { network: 'main', createdAt: new Date(), updatedAt: new Date() },
+      },
+      { upsert: true },
+    );
+    return created;
   },
 );
 
-// Static method to check if an event already exists
 EventLogSchema.static(
   'eventExists',
-  async function (
+  async function eventExists(
     this: IEventLogModel,
     transactionHash: string,
     eventType: string,
   ): Promise<boolean> {
-    const event = await this.findOne({ transactionHash, eventType });
-    return !!event;
+    const count = await this.countDocuments({ transactionHash, eventType });
+    return count > 0;
   },
 );
 
@@ -235,4 +257,5 @@ EventLogSchema.static(
 
 const EventLog = mongoose.model<IEventLog, IEventLogModel>('EventLog', EventLogSchema);
 
+const EventLog = mongoose.model<IEventLog, IEventLogModel>('EventLog', EventLogSchema);
 export default EventLog;

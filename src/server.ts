@@ -14,6 +14,7 @@ import { startAutoAssignmentJob, stopAutoAssignmentJob } from './jobs/autoAssign
 import { startDriverRatingJob, stopDriverRatingJob } from './jobs/driverRatingJob';
 import { startEventLogRetryJob, stopEventLogRetryJob } from './jobs/eventLogRetryJob';
 import { startEventPoller, stopEventPoller } from './services/eventPoller';
+import { startContractAbiMonitor, stopContractAbiMonitor } from './services/contractAbiService';
 import { initializeRedis, disconnectRedis } from './config/redis';
 
 const PORT = env.PORT;
@@ -52,6 +53,7 @@ if (env.NODE_ENV !== 'test') {
   startWebhookRetryJob();
   startAutoAssignmentJob();
   startDriverRatingJob();
+  startContractAbiMonitor();
   startEventPoller();
   startEventLogRetryJob();
 }
@@ -59,6 +61,7 @@ if (env.NODE_ENV !== 'test') {
 const gracefulShutdown = (): void => {
   logger.info('Shutting down gracefully...');
   stopEventPoller();
+  stopContractAbiMonitor();
   stopEventLogRetryJob();
   stopEscrowMonitorJob();
   stopWebhookRetryJob();

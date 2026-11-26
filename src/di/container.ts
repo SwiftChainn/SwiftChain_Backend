@@ -64,7 +64,7 @@ import * as evidenceService from '../services/evidenceService';
 import { indexerService } from '../services/indexerService';
 import * as monitorService from '../services/monitorService';
 import { idempotencyService } from '../services/idempotency.service';
-import { SdkSorobanRpcClient } from '../services/providers/adapters';
+import { defaultSorobanRpcClient } from '../services/providers/adapters';
 import { getStorageDriver } from '../services/storage.service';
 
 // ─── Controllers ───────────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ export function createDIContainer(): AwilixContainer {
 
     // ─── External SDK clients behind provider interfaces (issue #222) ─────
     [TOKENS.routingProvider]: asValue(routingService),
-    [TOKENS.sorobanRpcClient]: asValue(new SdkSorobanRpcClient()),
+    [TOKENS.sorobanRpcClient]: asValue(defaultSorobanRpcClient),
     [TOKENS.imagesStorage]: asValue(getStorageDriver()),
   });
 
