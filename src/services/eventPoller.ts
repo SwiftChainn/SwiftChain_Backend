@@ -2,10 +2,17 @@ import EventLog, { IEventLog } from '../models/EventLog';
 import { sorobanRpcClient, stellarConfig } from '../config/stellar';
 import { recordBatchWithCheckpoint } from './eventLogService';
 import logger from '../config/logger';
-import { xdr, rpc as StellarRpc } from '@stellar/stellar-sdk';
-
-export const INDEXER_BATCH_LEDGERS = Number(process.env.INDEXER_BATCH_LEDGERS ?? 5);
-const BATCH_LEDGER_CAP = 50;
+import { nextEventLogRetryAt } from '../utils/eventLogBackoff';
+import { handleEscrowFundedEvent } from '../indexer/escrowHandlers';
+import {
+  EventFamily,
+  EventPayloadValidationError,
+  getEventPayloadSchema,
+  validateSorobanEventPayload,
+} from '../validators/eventSchemas';
+import { contractAbiService } from './contractAbiService';
+import type { ISorobanRpcClient, SorobanGetEventsRequest } from './providers/sorobanRpcClient';
+import { defaultSorobanRpcClient } from './providers/adapters';
 
 export async function resolveStartLedger(): Promise<number> {
   const lastFromEventLog = await EventLog.findOne(
@@ -158,12 +165,10 @@ export interface EventPollerOptions {
   subscriptions: EventSubscription[];
   intervalMs: number;
   pageSize: number;
-  /**
-   * Optional event source. When omitted the poller pages the RPC node itself;
-   * injecting a fetcher keeps the loop testable with fakes or lets another
-   * source feed the pipeline.
-   */
-  fetchNextEvents?: FetchNextEvents;
+  /** Validate decoded payloads with Zod before handler dispatch. Default: true. */
+  validatePayloads?: boolean;
+  /** Optional pause predicate (defaults to ContractAbiService hard-mismatch pause state). */
+  isPaused?: () => boolean;
 }
 
 export interface PollCycleResult {
@@ -176,9 +181,291 @@ export interface PollCycleResult {
 }
 
 export class EventPoller implements EventReplayer {
-  constructor(_options: EventPollerOptions) {}
+  private readonly options: EventPollerOptions;
+  private readonly subscriptionsByTopic: Map<string, EventSubscription>;
+  private readonly filters: SorobanGetEventsRequest['filters'];
+  private readonly validatePayloads: boolean;
+  private readonly isPaused: () => boolean;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private inFlight: Promise<void> | null = null;
+
+  constructor(options: EventPollerOptions) {
+    this.options = options;
+    this.validatePayloads = options.validatePayloads ?? true;
+    this.isPaused = options.isPaused ?? ((): boolean => contractAbiService.isIngestionPaused());
+    this.subscriptionsByTopic = new Map(
+      options.subscriptions.map((subscription) => [topicKey(subscription.topic), subscription]),
+    );
+    this.filters = options.subscriptions.map((subscription) => ({
+      type: 'contract',
+      contractIds: [options.contractId],
+      topics: [[topicKey(subscription.topic), '*']],
+    }));
+  }
+
+  /** Begin polling on the configured interval. Idempotent. */
+  start(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => {
+      void this.runCycle();
+    }, this.options.intervalMs);
+    void this.runCycle();
+  }
+
+  /** Stop scheduling new cycles. A cycle already in flight runs to completion. */
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  /**
+   * Run one poll cycle. Errors propagate to the caller and leave the
+   * checkpoint untouched, so the same ledgers are retried on the next cycle.
+   */
   async pollOnce(): Promise<PollCycleResult> {
-    return { fromLedger: 0, toLedger: 0, fetched: 0, processed: 0, duplicates: 0, failed: 0 };
+    const { network, rpc } = this.options;
+
+    if (this.isPaused()) {
+      const checkpoint = await IndexerStatus.findOne({ network }).lean();
+      const ledger = checkpoint?.lastProcessedLedger ?? 0;
+      logger.warn(
+        `[EventPoller] Ingestion paused due to contract ABI mismatch — network=${network} ` +
+          `checkpoint=${ledger}`,
+      );
+      return {
+        fromLedger: ledger,
+        toLedger: ledger,
+        fetched: 0,
+        processed: 0,
+        duplicates: 0,
+        failed: 0,
+      };
+    }
+
+    const latest = await rpc.getLatestLedger();
+    const toLedger = latest.sequence;
+
+    const checkpoint = await IndexerStatus.findOne({ network }).lean();
+    // With no checkpoint yet, begin at the head rather than replaying history.
+    const fromLedger = checkpoint ? checkpoint.lastProcessedLedger + 1 : toLedger;
+
+    const result: PollCycleResult = {
+      fromLedger,
+      toLedger,
+      fetched: 0,
+      processed: 0,
+      duplicates: 0,
+      failed: 0,
+    };
+
+    if (fromLedger > toLedger) return result;
+
+    for await (const event of this.fetchEvents(fromLedger, toLedger)) {
+      result.fetched += 1;
+
+      const subscription = this.subscriptionForEvent(event);
+      if (!subscription) continue;
+
+      const outcome = await this.ingest(subscription, event);
+      result[outcome] += 1;
+    }
+
+    await IndexerStatus.updateOne(
+      { network },
+      { $set: { lastProcessedLedger: toLedger, lastProcessedAt: new Date() } },
+      { upsert: true },
+    );
+
+    logger.info(
+      `[EventPoller] Cycle complete — network=${network} ledgers=${fromLedger}-${toLedger} ` +
+        `fetched=${result.fetched} processed=${result.processed} ` +
+        `duplicates=${result.duplicates} failed=${result.failed}`,
+    );
+
+    return result;
+  }
+
+  /**
+   * Re-run one recorded event through the handler registered for its topic —
+   * the same dispatch path {@link ingest} uses — without touching its EventLog
+   * entry; the caller owns the outcome. EventLog keeps only a reference to the
+   * event, so it is fetched back from the RPC node by ledger and event id.
+   *
+   * @throws when the node no longer serves the event (outside its retention
+   *         window), when no subscription handles its topic, or when the
+   *         handler itself throws.
+   */
+  async replay(entry: ReplayableEvent): Promise<void> {
+    const event = await this.findRecordedEvent(entry);
+    if (!event) {
+      throw new Error(
+        `Event for tx=${entry.transactionHash} is no longer available at ledger ${entry.ledgerSequence}`,
+      );
+    }
+
+    const subscription = this.subscriptionForEvent(event);
+    if (!subscription || subscription.eventType !== entry.eventType) {
+      throw new Error(
+        `No ${entry.eventType} subscription handles the event for tx=${entry.transactionHash}`,
+      );
+    }
+
+    this.guardEventPayload(subscription, event);
+    await subscription.handle(event);
+  }
+
+  /** Validate a decoded Soroban event against its registered Zod schema before dispatch. */
+  private guardEventPayload(
+    subscription: EventSubscription,
+    event: StellarRpc.Api.EventResponse,
+  ): void {
+    if (!this.validatePayloads || subscription.eventType === 'milestone') {
+      return;
+    }
+
+    const family = subscription.eventType as EventFamily;
+    if (!getEventPayloadSchema(family, subscription.topic)) {
+      return;
+    }
+
+    validateSorobanEventPayload(family, subscription.topic, event);
+  }
+
+  /** Find the event an EventLog entry recorded, matching on event id when one was stored. */
+  private async findRecordedEvent(
+    entry: ReplayableEvent,
+  ): Promise<StellarRpc.Api.EventResponse | null> {
+    const eventId = (entry.eventData as { eventId?: string } | null | undefined)?.eventId;
+
+    for await (const event of this.fetchEvents(entry.ledgerSequence, entry.ledgerSequence)) {
+      const matches = eventId ? event.id === eventId : event.txHash === entry.transactionHash;
+      if (matches) return event;
+    }
+    return null;
+  }
+
+  /** Page through `getEvents` from `fromLedger`, yielding events up to `toLedger`. */
+  private async *fetchEvents(
+    fromLedger: number,
+    toLedger: number,
+  ): AsyncGenerator<StellarRpc.Api.EventResponse> {
+    const { rpc, pageSize } = this.options;
+    let cursor: string | undefined;
+
+    for (;;) {
+      const page = await rpc.getEvents(
+        cursor
+          ? { filters: this.filters, cursor, limit: pageSize }
+          : { filters: this.filters, startLedger: fromLedger, limit: pageSize },
+      );
+
+      if (page.events.length === 0) return;
+
+      for (const event of page.events) {
+        // Events arrive in ledger order, so the first event past the window ends the cycle.
+        if (event.ledger > toLedger) return;
+        yield event;
+      }
+
+      // A cursor that does not advance would page forever.
+      if (page.cursor === cursor) return;
+      cursor = page.cursor;
+    }
+  }
+
+  private subscriptionForEvent(event: StellarRpc.Api.EventResponse): EventSubscription | undefined {
+    const first = event.topic[0];
+    return first ? this.subscriptionsByTopic.get(first.toXDR('base64')) : undefined;
+  }
+
+  /**
+   * Record one event and dispatch it to its handler.
+   *
+   * A record already marked processed or failed is skipped. A record left
+   * `pending` by an interrupted earlier cycle is processed again, which is why
+   * handlers must be idempotent.
+   */
+  private async ingest(
+    subscription: EventSubscription,
+    event: StellarRpc.Api.EventResponse,
+  ): Promise<EventOutcome> {
+    const { eventType, handle } = subscription;
+    const transactionHash = event.txHash;
+
+    const existing = await EventLog.findOne({ transactionHash, eventType }).lean();
+    if (existing && existing.status !== 'pending') return 'duplicates';
+
+    if (!existing) {
+      try {
+        await EventLog.create({
+          eventType,
+          transactionHash,
+          ledgerSequence: event.ledger,
+          contractId: this.options.contractId,
+          eventData: { eventId: event.id, ledgerClosedAt: event.ledgerClosedAt },
+          status: 'pending',
+        });
+      } catch (error) {
+        // A concurrent writer recorded the same event between our read and write.
+        if (isDuplicateKeyError(error)) return 'duplicates';
+        throw error;
+      }
+    }
+
+    try {
+      this.guardEventPayload(subscription, event);
+      await handle(event);
+      await EventLog.markAsProcessed(transactionHash, eventType);
+      return 'processed';
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await EventLog.updateOne(
+        { transactionHash, eventType },
+        {
+          status: 'failed',
+          errorMessage,
+          lastError: errorMessage,
+          nextRetryAt: nextEventLogRetryAt(1),
+        },
+      );
+      if (error instanceof EventPayloadValidationError) {
+        logger.error('[EventPoller] Event payload validation failed — skipping handler dispatch', {
+          eventType,
+          topic: subscription.topic,
+          transactionHash,
+          ledger: event.ledger,
+          issues: error.issues,
+          error: errorMessage,
+        });
+      } else {
+        logger.error(
+          `[EventPoller] Handler failed — type=${eventType} tx=${transactionHash} ` +
+            `ledger=${event.ledger} error="${errorMessage}"`,
+        );
+      }
+      return 'failed';
+    }
+  }
+
+  /** Run a cycle unless one is already in flight, and log instead of throwing. */
+  private runCycle(): Promise<void> {
+    if (!this.inFlight) {
+      this.inFlight = this.pollOnce()
+        .then(
+          () => undefined,
+          (error: unknown) => {
+            logger.error(
+              `[EventPoller] Cycle failed — error="${
+                error instanceof Error ? error.message : String(error)
+              }"`,
+            );
+          },
+        )
+        .finally(() => {
+          this.inFlight = null;
+        });
+    }
+    return this.inFlight;
   }
   async replay(_entry: {
     eventType: string;

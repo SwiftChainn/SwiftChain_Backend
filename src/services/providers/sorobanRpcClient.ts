@@ -51,4 +51,13 @@ export interface ISorobanRpcClient {
   sendTransaction(
     tx: Transaction | FeeBumpTransaction,
   ): Promise<StellarRpc.Api.SendTransactionResponse>;
+  /**
+   * Read a contract data ledger entry (e.g. a `version` metadata key).
+   * Optional so existing test fakes that do not exercise ABI checks remain compatible.
+   */
+  getContractData?(
+    contractId: string,
+    key: import('@stellar/stellar-sdk').xdr.ScVal,
+    durability?: StellarRpc.Durability,
+  ): Promise<StellarRpc.Api.LedgerEntryResult | null>;
 }

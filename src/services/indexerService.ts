@@ -4,6 +4,8 @@ import logger from '../config/logger';
 import { emitDeliveryStatusUpdated } from '../sockets/connectionHandler';
 import type { ISorobanRpcClient } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
+import { ContractAbiSnapshot, contractAbiService } from './contractAbiService';
+
 export interface IndexerStatusData {
   eventType: string;
   contractId: string;
@@ -11,6 +13,11 @@ export interface IndexerStatusData {
   currentLedger: number;
   lag: number;
   updatedAt: Date;
+}
+
+export interface IndexerStatusOverview {
+  indexers: IndexerStatusData[];
+  contractVersions: ContractAbiSnapshot;
 }
 
 export interface DeliveryStatusUpdatedEvent {
@@ -50,6 +57,14 @@ export class IndexerService {
       );
       throw error;
     }
+  }
+
+  public async getIndexerStatusOverview(): Promise<IndexerStatusOverview> {
+    const indexers = await this.getIndexerStatus();
+    return {
+      indexers,
+      contractVersions: contractAbiService.getSnapshot(),
+    };
   }
 
   public async processDeliveryStatusUpdated(event: DeliveryStatusUpdatedEvent): Promise<void> {

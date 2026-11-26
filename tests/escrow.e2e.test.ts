@@ -308,8 +308,7 @@ describe('Escrow Lifecycle E2E Tests', () => {
         });
 
       const updated = await Escrow.findById(testEscrow._id);
-      // Check against both possible status field names
-      expect((updated as any).lockStatus || updated?.status).toBe(EscrowStatus.RELEASED);
+      expect(updated?.status).toBe(EscrowStatus.RELEASED);
     });
 
     it('escrow has release transaction hash recorded', async () => {

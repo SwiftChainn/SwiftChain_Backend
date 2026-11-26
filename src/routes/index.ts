@@ -27,6 +27,7 @@ import proofOfDeliveryRoutes from './proofOfDeliveryRoutes';
 import escrowRoutes from './escrow.routes';
 import escrowIndexerRoutes from './escrowIndexer.routes';
 import indexerRoutes from './indexer.routes';
+import indexerStatusRoutes from './indexerRoutes';
 import poolingRoutes from './poolingRoutes';
 import chatRoutes from './chatRoutes';
 import escrowAdminRoutes from './escrowAdminRoutes';
@@ -68,6 +69,7 @@ router.use('/v1/escrow', escrowRoutes);
 router.use('/v1/indexer', escrowIndexerRoutes);
 // Delivery-created contract events are posted by the indexer worker.
 router.use('/v1/indexer', indexerRoutes);
+router.use('/v1/indexer', indexerStatusRoutes);
 
 router.use('/v1/pooling', poolingRoutes);
 

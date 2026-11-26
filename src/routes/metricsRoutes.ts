@@ -2,6 +2,7 @@ import { Router, Response, NextFunction, Request } from 'express';
 import authenticate from '../middleware/authenticate';
 import requireRole from '../middleware/requireRole';
 import { UserRole } from '../interfaces/IUser';
+import { sendError } from '../utils/responseWrapper';
 import env from '../config/env';
 import { getPrometheusMetrics } from '../controllers/metricsController';
 
@@ -32,7 +33,7 @@ const router = Router();
  */
 const requireMetricsEnabled = (_req: Request, res: Response, next: NextFunction): void => {
   if (!env.ENABLE_METRICS) {
-    res.status(404).end();
+    sendError(res, 'Metrics endpoint is disabled', 404);
     return;
   }
   next();

@@ -14,7 +14,7 @@ import mongoose, { Types } from 'mongoose';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
+import { rpc as StellarRpc, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import app from '../src/app';
 import env from '../src/config/env';
 import EventLog, { IEventLog } from '../src/models/EventLog';
@@ -60,8 +60,8 @@ const buildEvent = (ledger: number, topic = FUNDED_TOPIC): StellarRpc.Api.EventR
     ledgerClosedAt: '2026-10-21T00:00:00Z',
     contractId: CONTRACT_ID,
     txHash: `tx-${id}`,
-    topic: [xdr.ScVal.scvSymbol(topic)],
-    value: xdr.ScVal.scvVoid(),
+    topic: [xdr.ScVal.scvSymbol(topic), nativeToScVal(`delivery-${ledger}`, { type: 'string' })],
+    value: nativeToScVal({ amount: 100n, asset: 'XLM', funded_by: 'GFUNDER123456' }),
     inSuccessfulContractCall: true,
     pagingToken: id,
   } as unknown as StellarRpc.Api.EventResponse;

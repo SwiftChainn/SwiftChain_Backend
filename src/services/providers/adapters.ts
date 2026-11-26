@@ -9,12 +9,8 @@
  */
 
 import axios from 'axios';
-import type { Transaction, FeeBumpTransaction, rpc as StellarRpc } from '@stellar/stellar-sdk';
-import {
-  createSorobanRpcClientForUrl,
-  sorobanRpcClient,
-  stellarConfig,
-} from '../../config/stellar';
+import type { Transaction, FeeBumpTransaction, rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
+import { sorobanRpcClient } from '../../config/stellar';
 import type { Coordinates, ETARequest, ETAResponse, IRoutingProvider } from './routingProvider';
 import type {
   ISorobanRpcClient,
@@ -218,6 +214,18 @@ export class SdkSorobanRpcClient implements ISorobanRpcClient {
 
   sendTransaction(tx: Transaction | FeeBumpTransaction) {
     return this.server.sendTransaction(tx);
+  }
+
+  async getContractData(
+    contractId: string,
+    key: xdr.ScVal,
+    durability?: StellarRpc.Durability,
+  ): Promise<StellarRpc.Api.LedgerEntryResult | null> {
+    try {
+      return await this.server.getContractData(contractId, key, durability);
+    } catch {
+      return null;
+    }
   }
 }
 
