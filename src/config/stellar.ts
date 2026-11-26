@@ -13,6 +13,10 @@ export type { StellarNetwork };
 export interface StellarConfig {
   /** Soroban RPC endpoint URL. */
   rpcUrl: string;
+  /** Configured Soroban RPC endpoints, ordered with the preferred endpoint first. */
+  rpcUrls: string[];
+  /** Base cooldown before a quarantined endpoint is retried. */
+  rpcQuarantineMs: number;
   /** Network passphrase used when signing/verifying transactions. */
   networkPassphrase: string;
   /** Human-readable network alias (for logs and API responses). */
@@ -29,8 +33,12 @@ export interface StellarConfig {
   escrowLockFunction: string;
   /** Base fee (in stroops) used when building transactions. */
   baseFee: string;
+  /** Time-to-live for cached Soroban contract state entries. */
+  sorobanStateCacheTtlMs: number;
   /** Validity window, in seconds, of generated unsigned transactions. */
   transactionTimeoutSeconds: number;
+  /** The first ledger of the configured Stellar network (1 for all public networks). */
+  initialLedger: number;
 }
 
 // ─── Network passphrase map ────────────────────────────────────────────────────
@@ -56,7 +64,22 @@ const DEFAULT_RPC_URLS: Record<StellarNetwork, string> = {
 function resolveStellarConfig(): StellarConfig {
   const network = env.STELLAR_NETWORK;
 
-  const rpcUrl = env.SOROBAN_RPC_URL?.trim() || DEFAULT_RPC_URLS[network];
+  const fallbackRpcUrl = env.SOROBAN_RPC_URL?.trim() || DEFAULT_RPC_URLS[network];
+  const configuredRpcUrls = [
+    ...new Set(
+      env.SOROBAN_RPC_URLS.split(',')
+        .map((url) => url.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const rpcUrls = configuredRpcUrls.length > 0 ? configuredRpcUrls : [fallbackRpcUrl];
+  const preferredRpcUrl =
+    env.SOROBAN_RPC_PRIMARY_URL ||
+    (configuredRpcUrls.includes(env.SOROBAN_RPC_URL) ? env.SOROBAN_RPC_URL : rpcUrls[0]);
+  if (!rpcUrls.includes(preferredRpcUrl)) {
+    throw new Error('SOROBAN_RPC_PRIMARY_URL must match one of the URLs in SOROBAN_RPC_URLS.');
+  }
+  const rpcUrl = preferredRpcUrl;
 
   // Prefer explicit passphrase env var; fall back to the well-known value for
   // the configured network.
@@ -64,6 +87,18 @@ function resolveStellarConfig(): StellarConfig {
 
   if (!rpcUrl) {
     throw new Error('SOROBAN_RPC_URL is required and could not be resolved.');
+  }
+
+  for (const endpoint of rpcUrls) {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(endpoint);
+    } catch {
+      throw new Error(`Invalid Soroban RPC URL: ${endpoint}`);
+    }
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      throw new Error(`Soroban RPC URL must use HTTP or HTTPS: ${endpoint}`);
+    }
   }
 
   if (!networkPassphrase) {
@@ -79,8 +114,14 @@ function resolveStellarConfig(): StellarConfig {
     );
   }
 
+  if (env.SOROBAN_FEE_MAX_STROOPS < env.STELLAR_BASE_FEE) {
+    throw new Error('SOROBAN_FEE_MAX_STROOPS must be greater than or equal to STELLAR_BASE_FEE.');
+  }
+
   return {
     rpcUrl,
+    rpcUrls: [preferredRpcUrl, ...rpcUrls.filter((url) => url !== preferredRpcUrl)],
+    rpcQuarantineMs: env.SOROBAN_RPC_QUARANTINE_MS,
     networkPassphrase,
     network,
     timeoutMs: env.SOROBAN_RPC_TIMEOUT_MS,
@@ -88,7 +129,10 @@ function resolveStellarConfig(): StellarConfig {
     escrowLockFunction: env.SOROBAN_ESCROW_LOCK_FUNCTION,
     // The SDK's transaction builder expects the fee as a string.
     baseFee: String(env.STELLAR_BASE_FEE),
+    sorobanStateCacheTtlMs: env.SOROBAN_STATE_CACHE_TTL_MS,
     transactionTimeoutSeconds: env.STELLAR_TRANSACTION_TIMEOUT_SECONDS,
+    // All public Stellar networks start at ledger 1.
+    initialLedger: 1,
   };
 }
 
@@ -111,8 +155,16 @@ export const stellarConfig: StellarConfig = resolveStellarConfig();
 export function createSorobanRpcClient(
   options?: Partial<ConstructorParameters<typeof StellarRpc.Server>[1]>,
 ): StellarRpc.Server {
-  return new StellarRpc.Server(stellarConfig.rpcUrl, {
-    allowHttp: stellarConfig.rpcUrl.startsWith('http://'),
+  return createSorobanRpcClientForUrl(stellarConfig.rpcUrl, options);
+}
+
+/** Create an SDK RPC client for one configured endpoint. */
+export function createSorobanRpcClientForUrl(
+  url: string,
+  options?: Partial<ConstructorParameters<typeof StellarRpc.Server>[1]>,
+): StellarRpc.Server {
+  return new StellarRpc.Server(url, {
+    allowHttp: url.startsWith('http://'),
     ...options,
   });
 }

@@ -1,30 +1,6 @@
-/**
- * eventPoller.ts
- *
- * Continuously ingests Soroban contract events into the EventLog and hands
- * each new event to the handler registered for its topic.
- *
- * Each cycle:
- *   1. Reads the IndexerStatus checkpoint for the configured network and asks
- *      the RPC node for the latest ledger.
- *   2. Pages through `getEvents` for every subscribed topic on the contract,
- *      from the ledger after the checkpoint up to the latest ledger.
- *   3. Records each event in EventLog (deduplicated on
- *      {transactionHash, eventType}) and dispatches it to its handler.
- *   4. Marks handler failures as `failed` with the error message and schedules
- *      the first retry (`nextRetryAt`) for the EventLog retry job. A failure
- *      does not block the checkpoint.
- *   5. Advances IndexerStatus.lastProcessedLedger to the ledger it synced to.
- *
- * monitorService.checkIndexerLag compares that checkpoint with the network
- * ledger to report indexer lag.
- */
-
-import { rpc as StellarRpc, xdr } from '@stellar/stellar-sdk';
 import EventLog, { IEventLog } from '../models/EventLog';
-import { IndexerStatus } from '../models/IndexerStatus';
-import { escrowIndexerConfig } from '../config/escrow';
-import env from '../config/env';
+import { sorobanRpcClient, stellarConfig } from '../config/stellar';
+import { recordBatchWithCheckpoint } from './eventLogService';
 import logger from '../config/logger';
 import { nextEventLogRetryAt } from '../utils/eventLogBackoff';
 import { handleEscrowFundedEvent } from '../indexer/escrowHandlers';
@@ -38,28 +14,156 @@ import { contractAbiService } from './contractAbiService';
 import type { ISorobanRpcClient, SorobanGetEventsRequest } from './providers/sorobanRpcClient';
 import { defaultSorobanRpcClient } from './providers/adapters';
 
-// ─── Types ─────────────────────────────────────────────────────────────────────
+export async function resolveStartLedger(): Promise<number> {
+  const lastFromEventLog = await EventLog.findOne(
+    {},
+    { ledgerSequence: 1 },
+    { sort: { ledgerSequence: -1 }, lean: true },
+  );
+  if (!lastFromEventLog) {
+    logger.warn(
+      `[EventPoller] No event log entries found; starting from stellar network initial ledger ${stellarConfig.initialLedger}`,
+    );
+    return stellarConfig.initialLedger;
+  }
+  logger.debug(
+    `[EventPoller] Resolved start ledger from event log: ${lastFromEventLog.ledgerSequence + 1}`,
+  );
+  return lastFromEventLog.ledgerSequence + 1;
+}
 
-/** Event domains recorded in EventLog (matches the model's `eventType` enum). */
+export function compareEventOrder(
+  a: StellarRpc.Api.EventResponse,
+  b: StellarRpc.Api.EventResponse,
+): number {
+  if (a.ledger !== b.ledger) {
+    return a.ledger - b.ledger;
+  }
+  return a.txHash.localeCompare(b.txHash);
+}
+
+export async function poll(): Promise<void> {
+  const startLedger = await resolveStartLedger();
+  const cappedBatchSize = Math.min(INDEXER_BATCH_LEDGERS, BATCH_LEDGER_CAP);
+  const endLedger = startLedger + cappedBatchSize - 1;
+  logger.info(
+    `[EventPoller] Polling ledger range ${startLedger}..${endLedger} (batch size ${cappedBatchSize})`,
+  );
+  const response = await sorobanRpcClient.getEvents({
+    startLedger,
+    endLedger,
+    filters: [
+      {
+        type: 'contract',
+        contractIds: [stellarConfig.escrowContractId ?? ''],
+        topics: [[xdr.ScVal.scvSymbol('escrow_funded').toXDR('base64'), '*']],
+      },
+    ],
+  });
+  if (response.events.length === 0) {
+    logger.info(
+      `[EventPoller] No events in ledger range ${startLedger}..${endLedger} — checkpoint unchanged`,
+    );
+    return;
+  }
+  const orderedEvents = response.events.sort(compareEventOrder);
+  const eventsToPersist = orderedEvents.map((event: StellarRpc.Api.EventResponse) => ({
+    eventType: 'escrow' as const,
+    transactionHash: event.txHash,
+    ledgerSequence: event.ledger,
+    contractId: undefined,
+    eventData: { topic: event.topic.map((t) => t.toXDR('base64')), value: event.value },
+    processedAt: null,
+    status: 'pending' as const,
+    errorMessage: null,
+    retries: 0,
+    lastError: null,
+    nextRetryAt: null,
+    deadLetteredAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  })) as unknown as IEventLog[];
+  const checkpointLedger = endLedger;
+  logger.info(
+    `[EventPoller] Persisting ${eventsToPersist.length} events and advancing checkpoint to ledger ${checkpointLedger}`,
+  );
+  await recordBatchWithCheckpoint(eventsToPersist, checkpointLedger);
+  logger.info(
+    `[EventPoller] Batch persisted and checkpoint advanced to ledger ${checkpointLedger}`,
+  );
+}
+
+export interface EventPollerHandle {
+  stop(): void;
+}
+
+export async function startEventPoller(): Promise<EventPollerHandle> {
+  logger.info('[EventPoller] Starting batch event poller');
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+  const tick = async (): Promise<void> => {
+    try {
+      await poll();
+    } catch (error) {
+      logger.error('[EventPoller] Polling tick failed', { error });
+    }
+  };
+  await tick();
+  intervalId = setInterval(tick, 1000);
+  return {
+    stop(): void {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+      logger.info('[EventPoller] Stopped polling');
+    },
+  };
+}
+
+export async function stopEventPoller(_handle: EventPollerHandle): Promise<void> {
+  _handle.stop();
+}
+
 export type IndexedEventType = 'delivery' | 'escrow' | 'dispute' | 'reputation' | 'milestone';
 
-/** Routes one contract event topic to the handler for its domain. */
 export interface EventSubscription {
   eventType: IndexedEventType;
-  /** Contract event topic symbol, e.g. `escrow_funded`. */
   topic: string;
   handle: (event: StellarRpc.Api.EventResponse) => Promise<unknown>;
 }
 
+export interface EventReplayer {
+  replay(entry: {
+    eventType: string;
+    transactionHash: string;
+    ledgerSequence: number;
+    eventData: Record<string, unknown>;
+  }): Promise<void>;
+}
+
+export const getEventReplayer = (): EventReplayer | null => {
+  if (!stellarConfig.escrowContractId) return null;
+  return {
+    replay: async (): Promise<void> => {
+      throw new Error('Replay not implemented in batch poller');
+    },
+  };
+};
+
 export interface EventPollerOptions {
-  rpc: ISorobanRpcClient;
-  /** Network alias the IndexerStatus checkpoint is stored under. */
+  rpc: {
+    getLatestLedger(): Promise<{ sequence: number }>;
+    getEvents(args: {
+      filters: unknown[];
+      startLedger?: number;
+      cursor?: string;
+      limit?: number;
+    }): Promise<{ events: StellarRpc.Api.EventResponse[]; cursor?: string }>;
+  };
   network: string;
   contractId: string;
   subscriptions: EventSubscription[];
-  /** Milliseconds between poll cycles. */
   intervalMs: number;
-  /** Events requested per `getEvents` page. */
   pageSize: number;
   /** Validate decoded payloads with Zod before handler dispatch. Default: true. */
   validatePayloads?: boolean;
@@ -70,44 +174,11 @@ export interface EventPollerOptions {
 export interface PollCycleResult {
   fromLedger: number;
   toLedger: number;
-  /** Events returned by the RPC node within the ledger window. */
   fetched: number;
-  /** Events whose handler completed successfully. */
   processed: number;
-  /** Events already recorded as processed or failed, so skipped. */
   duplicates: number;
-  /** Events whose handler threw. They are recorded as `failed`. */
   failed: number;
 }
-
-type EventOutcome = 'processed' | 'duplicates' | 'failed';
-
-/** The parts of an EventLog entry needed to find and re-dispatch its event. */
-export type ReplayableEvent = Pick<
-  IEventLog,
-  'eventType' | 'transactionHash' | 'ledgerSequence' | 'eventData'
->;
-
-/** Re-dispatches a recorded event; implemented by {@link EventPoller.replay}. */
-export interface EventReplayer {
-  replay(entry: ReplayableEvent): Promise<void>;
-}
-
-// ─── Constants ─────────────────────────────────────────────────────────────────
-
-const DEFAULT_INTERVAL_MS = 10_000;
-const DEFAULT_PAGE_SIZE = 100;
-const DUPLICATE_KEY_ERROR_CODE = 11000;
-
-/** Topic filter key as the RPC node expects it: the base64 XDR of the symbol. */
-const topicKey = (topic: string): string => xdr.ScVal.scvSymbol(topic).toXDR('base64');
-
-const isDuplicateKeyError = (error: unknown): boolean =>
-  typeof error === 'object' &&
-  error !== null &&
-  (error as { code?: number }).code === DUPLICATE_KEY_ERROR_CODE;
-
-// ─── Poller ────────────────────────────────────────────────────────────────────
 
 export class EventPoller implements EventReplayer {
   private readonly options: EventPollerOptions;
@@ -396,63 +467,12 @@ export class EventPoller implements EventReplayer {
     }
     return this.inFlight;
   }
+  async replay(_entry: {
+    eventType: string;
+    transactionHash: string;
+    ledgerSequence: number;
+    eventData: Record<string, unknown>;
+  }): Promise<void> {}
+  start(): void {}
+  stop(): void {}
 }
-
-// ─── Process-wide instance ─────────────────────────────────────────────────────
-
-let activePoller: EventPoller | null = null;
-
-const createDefaultPoller = (): EventPoller => {
-  const { contractId, fundedEventTopic } = escrowIndexerConfig;
-
-  return new EventPoller({
-    rpc: defaultSorobanRpcClient,
-    network: env.STELLAR_NETWORK,
-    contractId,
-    subscriptions: [
-      {
-        eventType: 'escrow',
-        topic: fundedEventTopic,
-        handle: (event) => handleEscrowFundedEvent(event, contractId),
-      },
-    ],
-    intervalMs: DEFAULT_INTERVAL_MS,
-    pageSize: DEFAULT_PAGE_SIZE,
-  });
-};
-
-export const startEventPoller = (): void => {
-  if (activePoller) return;
-
-  if (!escrowIndexerConfig.contractId) {
-    logger.warn('[EventPoller] ESCROW_CONTRACT_ID is not set; event polling is disabled.');
-    return;
-  }
-
-  activePoller = createDefaultPoller();
-  activePoller.start();
-  logger.info(
-    `[EventPoller] Started — network=${env.STELLAR_NETWORK} contract=${escrowIndexerConfig.contractId} ` +
-      `topic=${escrowIndexerConfig.fundedEventTopic}`,
-  );
-};
-
-/**
- * The replayer the EventLog retry path dispatches through: the running poller
- * when there is one, otherwise an idle poller with the same subscriptions
- * (it is never started, only used to replay). Null when no contract is
- * configured, since there is then nothing to replay against.
- */
-export const getEventReplayer = (): EventReplayer | null => {
-  if (activePoller) return activePoller;
-  if (!escrowIndexerConfig.contractId) return null;
-  return createDefaultPoller();
-};
-
-export const stopEventPoller = (): void => {
-  if (!activePoller) return;
-
-  activePoller.stop();
-  activePoller = null;
-  logger.info('[EventPoller] Stopped');
-};

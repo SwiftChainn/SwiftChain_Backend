@@ -144,6 +144,7 @@ describe('SdkSorobanRpcClient', () => {
       getHealth: jest.fn().mockResolvedValue({ status: 'healthy' }),
       getTransaction: jest.fn().mockResolvedValue({ status: 'NOT_FOUND' }),
       getEvents: jest.fn().mockResolvedValue({ events: [], latestLedger: 1, cursor: '' }),
+      getLedgerEntries: jest.fn().mockResolvedValue({ entries: [], latestLedger: 1 }),
       getLatestLedger: jest.fn().mockResolvedValue({ sequence: 42 }),
       getNetwork: jest.fn().mockResolvedValue({ passphrase: 'test' }),
       prepareTransaction: jest.fn().mockResolvedValue({ sequence: 43 }),
@@ -156,6 +157,8 @@ describe('SdkSorobanRpcClient', () => {
     await client.getHealth();
     await client.getTransaction('hash');
     await client.getEvents({ filters: [], startLedger: 1 });
+    const ledgerKey = {} as never;
+    await client.getLedgerEntries(ledgerKey);
     await client.getLatestLedger();
     await client.getNetwork();
     await client.prepareTransaction(tx);
@@ -165,6 +168,7 @@ describe('SdkSorobanRpcClient', () => {
     expect(server.getHealth).toHaveBeenCalledTimes(1);
     expect(server.getTransaction).toHaveBeenCalledWith('hash');
     expect(server.getEvents).toHaveBeenCalledWith({ filters: [], startLedger: 1 });
+    expect(server.getLedgerEntries).toHaveBeenCalledWith(ledgerKey);
     expect(server.getLatestLedger).toHaveBeenCalledTimes(1);
     expect(server.getNetwork).toHaveBeenCalledTimes(1);
     expect(server.prepareTransaction).toHaveBeenCalledWith(tx);

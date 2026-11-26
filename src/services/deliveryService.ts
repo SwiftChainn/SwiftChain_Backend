@@ -139,8 +139,8 @@ class DeliveryService {
 
     // Generate secure token
     const token = generateQrToken(deliveryId);
-    const expiryMinutes = parseInt(process.env.QR_TOKEN_EXPIRY_MINUTES ?? '30', 10);
-    const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
+    const ttlSeconds = Number(process.env.QR_TOKEN_TTL_SECONDS ?? '1800');
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
 
     // QR code encodes: delivery ID + verification token
     const qrData = JSON.stringify({
