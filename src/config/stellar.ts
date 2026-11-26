@@ -31,6 +31,8 @@ export interface StellarConfig {
   baseFee: string;
   /** Validity window, in seconds, of generated unsigned transactions. */
   transactionTimeoutSeconds: number;
+  /** The first ledger of the configured Stellar network (1 for all public networks). */
+  initialLedger: number;
 }
 
 // ─── Network passphrase map ────────────────────────────────────────────────────
@@ -89,6 +91,8 @@ function resolveStellarConfig(): StellarConfig {
     // The SDK's transaction builder expects the fee as a string.
     baseFee: String(env.STELLAR_BASE_FEE),
     transactionTimeoutSeconds: env.STELLAR_TRANSACTION_TIMEOUT_SECONDS,
+    // All public Stellar networks start at ledger 1.
+    initialLedger: 1,
   };
 }
 

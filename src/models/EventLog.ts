@@ -1,8 +1,8 @@
-import mongoose, { Schema } from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 import { startTrackedSession } from '../config/database';
 import logger from '../config/logger';
 
-export interface IEventLog {
+export interface IEventLog extends Document {
   eventType: 'escrow' | 'delivery' | string;
   transactionHash: string;
   ledgerSequence: number;
@@ -12,29 +12,21 @@ export interface IEventLog {
   processedAt: Date | null;
   status: 'pending' | 'processed' | 'failed';
   errorMessage?: string | null;
-  /** Retry attempts made after the initial failure (manual and scheduled). */
   retries: number;
-  /** Error from the most recent failed attempt, initial or retry. */
   lastError?: string | null;
-  /** When the retry job may next pick this entry up; null when none is scheduled. */
   nextRetryAt?: Date | null;
-  /** Set once retries are exhausted and the entry is escalated to the DLQ. */
   deadLetteredAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export interface IEventLogDocument extends Omit<IEventLog, 'eventType'>, mongoose.Document {
-  eventType: 'escrow' | 'delivery' | string;
-}
-
-export type RecordBatchInput = IEventLog[] | IEventLogDocument[];
+export type RecordBatchInput = IEventLog[];
 export type RecordBatchResult = {
   inserted: IEventLog[];
   checkpointLedger: number;
 };
 
-export interface IEventLogModel extends mongoose.Model<IEventLogDocument> {
+export interface IEventLogModel extends mongoose.Model<IEventLog> {
   recordBatchWithCheckpoint: (
     this: IEventLogModel,
     events: RecordBatchInput,
@@ -47,108 +39,46 @@ export interface IEventLogModel extends mongoose.Model<IEventLogDocument> {
       'eventType' | 'transactionHash' | 'ledgerSequence' | 'contractId' | 'eventData'
     >,
     checkpointLedger: number,
-  ) => Promise<IEventLogDocument>;
+  ) => Promise<IEventLog>;
+  eventExists(transactionHash: string, eventType: string): Promise<boolean>;
+  markAsProcessed(transactionHash: string, eventType: string): Promise<IEventLog | null>;
 }
 
-const EventLogSchema = new Schema<IEventLogDocument, IEventLogModel>(
+const EventLogSchema = new Schema<IEventLog, IEventLogModel>(
   {
     eventType: {
       type: String,
-      required: [true, 'Event type is required'],
-      enum: ['delivery', 'escrow', 'dispute', 'reputation', 'milestone'],
-      index: true,
+      required: true,
+      enum: ['escrow', 'delivery', 'dispute', 'reputation', 'milestone'],
     },
-    transactionHash: {
-      type: String,
-      required: [true, 'Transaction hash is required'],
-      index: true,
-      trim: true,
-    },
-    ledgerSequence: {
-      type: Number,
-      required: [true, 'Ledger sequence is required'],
-      index: true,
-      min: [0, 'Ledger sequence must be a positive number'],
-    },
-    contractId: {
-      type: String,
-      index: true,
-      trim: true,
-      default: null,
-    },
-    eventData: {
-      type: Schema.Types.Mixed,
-      default: null,
-    },
-    processedAt: {
-      type: Date,
-      default: null,
-    },
+    transactionHash: { type: String, required: true, trim: true },
+    ledgerSequence: { type: Number, required: true },
+    contractId: { type: String, required: false },
+    eventData: { type: mongoose.Schema.Types.Mixed, required: true, default: {} },
+    indexedAt: { type: Date, required: false },
+    processedAt: { type: Date, required: true, default: null },
     status: {
       type: String,
-      required: [true, 'Status is required'],
+      required: true,
       enum: ['pending', 'processed', 'failed'],
       default: 'pending',
-      index: true,
     },
-    errorMessage: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    retries: {
-      type: Number,
-      default: 0,
-      min: [0, 'Retries cannot be negative'],
-    },
-    lastError: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    nextRetryAt: {
-      type: Date,
-      default: null,
-    },
-    deadLetteredAt: {
-      type: Date,
-      default: null,
-    },
+    errorMessage: { type: String, required: false, default: null },
+    retries: { type: Number, required: true, default: 0 },
+    lastError: { type: String, required: false, default: null },
+    nextRetryAt: { type: Date, required: false, default: null },
+    deadLetteredAt: { type: Date, required: false, default: null },
   },
-  {
-    timestamps: true,
-    toJSON: {
-      transform: (_doc: unknown, ret: Record<string, unknown>): Record<string, unknown> => {
-        ret.id = ret._id;
-        delete ret._id;
-        delete ret.__v;
-        return ret;
-      },
-    },
-  },
+  { timestamps: true, versionKey: false },
 );
 
 EventLogSchema.index(
   { transactionHash: 1, eventType: 1 },
   { unique: true, name: 'idx_event_log_transaction_hash_event_type' },
 );
-// Compound index to prevent duplicate processing
-EventLogSchema.index({ transactionHash: 1, eventType: 1 }, { unique: true });
 
-// Index for efficient querying of unprocessed events
-EventLogSchema.index({ status: 1, createdAt: 1 });
-
-// Index for the retry job: failed entries whose backoff window has elapsed
-EventLogSchema.index({ status: 1, nextRetryAt: 1 });
-
-// Index for ledger sequence range queries
-EventLogSchema.index({ ledgerSequence: 1, eventType: 1 });
-
-// Pre-save middleware to set processedAt if status is processed
 EventLogSchema.pre<IEventLog>('save', function (next) {
-  if (this.status === 'processed' && !this.processedAt) {
-    this.processedAt = new Date();
-  }
+  this.updatedAt = new Date();
   next();
 });
 
@@ -160,48 +90,32 @@ EventLogSchema.static(
     checkpointLedger: number,
   ): Promise<RecordBatchResult> {
     const mongooseDocEvents = events.map((event) =>
-      event instanceof mongoose.Document ? (event as IEventLogDocument) : (event as IEventLog),
+      event instanceof mongoose.Document ? (event as IEventLog) : (event as IEventLog),
     );
-
-    // Transaction-critical path: persist events document-by-document, then atomically
-    // advance the checkpoint in the same Mongoose session so a crash cannot leave events
-    // persisted without their checkpoint (exactly-once semantics).
     const session = await startTrackedSession();
     const inserted: IEventLog[] = [];
     try {
       for (const event of mongooseDocEvents) {
-        const createdDoc = await this.create([event], { session });
-        inserted.push(createdDoc.toObject() as IEventLog);
+        const createdDocs = await this.create([event], { session });
+        inserted.push(createdDocs[0].toObject() as IEventLog);
       }
-
-      // Update the checkpoint after all events are persisted in this batch.
       await this.db.collection('indexer_statuses').updateOne(
         { network: 'main' },
         {
-          $set: {
-            lastProcessedLedger: checkpointLedger,
-            lastProcessedAt: new Date(),
-          },
-          $setOnInsert: {
-            network: 'main',
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          },
+          $set: { lastProcessedLedger: checkpointLedger, lastProcessedAt: new Date() },
+          $setOnInsert: { network: 'main', createdAt: new Date(), updatedAt: new Date() },
         },
         { session, upsert: true },
       );
-
-      await session.commitTransaction();
       logger.info(
-        `[EventLogService] Atomically recorded batch of ${inserted.length} events ` +
-          `and advanced checkpoint to ledger ${checkpointLedger}`,
+        `[EventLog] Batch of ${inserted.length} events persisted and checkpoint advanced to ledger ${checkpointLedger}`,
       );
-      return { inserted, checkpointLedger };
+      return { inserted: inserted.map((e) => e.toObject() as IEventLog), checkpointLedger };
     } catch (error) {
-      await session.abortTransaction();
+      logger.error('[EventLog] Failed to record batch with checkpoint:', error);
       throw error;
     } finally {
-      session.endSession();
+      await session.endSession();
     }
   },
 );
@@ -215,32 +129,46 @@ EventLogSchema.static(
       'eventType' | 'transactionHash' | 'ledgerSequence' | 'contractId' | 'eventData'
     >,
     checkpointLedger: number,
-  ): Promise<IEventLogDocument> {
-    // Insert the event; the unique index rejects duplicates.
+  ): Promise<IEventLog> {
     const created = await this.create(event as IEventLog);
-
-    // Upsert the checkpoint in the same operation order so a crash here cannot
-    // leave an event without its checkpoint or a checkpoint without its event.
     await this.db.collection('indexer_statuses').updateOne(
       { network: 'main' },
       {
-        $set: {
-          lastProcessedLedger: checkpointLedger,
-          lastProcessedAt: new Date(),
-        },
-        $setOnInsert: {
-          network: 'main',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
+        $set: { lastProcessedLedger: checkpointLedger, lastProcessedAt: new Date() },
+        $setOnInsert: { network: 'main', createdAt: new Date(), updatedAt: new Date() },
       },
       { upsert: true },
     );
-
     return created;
   },
 );
 
-const EventLog = mongoose.model<IEventLog, IEventLogModel>('EventLog', EventLogSchema);
+EventLogSchema.static(
+  'eventExists',
+  async function eventExists(
+    this: IEventLogModel,
+    transactionHash: string,
+    eventType: string,
+  ): Promise<boolean> {
+    const count = await this.countDocuments({ transactionHash, eventType });
+    return count > 0;
+  },
+);
 
+EventLogSchema.static(
+  'markAsProcessed',
+  async function markAsProcessed(
+    this: IEventLogModel,
+    transactionHash: string,
+    eventType: string,
+  ): Promise<IEventLog | null> {
+    return this.findOneAndUpdate(
+      { transactionHash, eventType },
+      { status: 'processed', processedAt: new Date() },
+      { new: true },
+    );
+  },
+);
+
+const EventLog = mongoose.model<IEventLog, IEventLogModel>('EventLog', EventLogSchema);
 export default EventLog;

@@ -3,22 +3,14 @@ import { startTrackedSession } from '../config/database';
 import logger from '../config/logger';
 import type { ClientSession, SortOrder } from 'mongoose';
 
-// --- Atomic batch ingestion -----------------------------------------------
-
-/**
- * Record a batch of events and advance the checkpoint atomically inside a
- * Mongoose transaction (when a replica set is available). Falls back to
- * standalone writes when a transaction cannot be started.
- */
 export async function recordBatchWithCheckpoint(
   events: RecordBatchInput,
   checkpointLedger: number,
 ): Promise<RecordBatchResult> {
   const mongooseDocEvents = events.map((event) =>
-    event instanceof EventLog ? event : EventLog.build(event as IEventLog),
+    event instanceof EventLog ? event : new EventLog(event as IEventLog),
   );
-
-  let session: ClientSession | undefined;
+  let session: ClientSession | null = null;
   let sessionStarted = false;
   try {
     session = await startTrackedSession();
@@ -26,7 +18,7 @@ export async function recordBatchWithCheckpoint(
     await EventLog.recordBatchWithCheckpoint(mongooseDocEvents, checkpointLedger);
     return { inserted: mongooseDocEvents.map((e) => e.toObject() as IEventLog), checkpointLedger };
   } catch (error) {
-    if (sessionStarted) {
+    if (sessionStarted && session) {
       await session.abortTransaction();
     }
     throw error;
@@ -37,27 +29,66 @@ export async function recordBatchWithCheckpoint(
   }
 }
 
-/**
- * Backward-compatible alias used by existing consumers that expect a single
- * "record processed ledger" call. It records nothing new when the ledger has
- * already been processed.
- */
 export async function recordProcessedLedger(ledger: number): Promise<void> {
   logger.info(`[EventLogService] recordProcessedLedger invoked for ledger ${ledger}`);
-  // No-op against the existing interface contract; the real work happens in
-  // recordBatchWithCheckpoint driven from the event poller.
 }
 
-// --- EventLogService class (kept for backward compatibility) ----------------
-
-/**
- * Service class providing the legacy event-log API used by the controller and
- * routes. New batch-ingestion paths use the standalone functions above.
- */
 export class EventLogService {
-  /**
-   * Get all unprocessed events
-   */
+  async createEventLog(eventData: {
+    eventType: string;
+    transactionHash: string;
+    ledgerSequence: number;
+    contractId?: string;
+    eventData?: Record<string, unknown>;
+    status?: string;
+  }): Promise<IEventLog> {
+    try {
+      const existing = await EventLog.findOne({
+        transactionHash: eventData.transactionHash,
+        eventType: eventData.eventType,
+      });
+      if (existing) {
+        throw new Error('Event already exists');
+      }
+      const event = new EventLog({
+        eventType: eventData.eventType,
+        transactionHash: eventData.transactionHash,
+        ledgerSequence: eventData.ledgerSequence,
+        contractId: eventData.contractId,
+        eventData: eventData.eventData ?? {},
+        status: eventData.status ?? 'pending',
+        processedAt: null,
+        errorMessage: null,
+        retries: 0,
+        lastError: null,
+        nextRetryAt: null,
+        deadLetteredAt: null,
+      });
+      await event.save();
+      return event;
+    } catch (error) {
+      logger.error('Error creating event log:', error);
+      throw error;
+    }
+  }
+
+  async markAsProcessed(transactionHash: string, eventType?: string): Promise<IEventLog | null> {
+    try {
+      const filter: Record<string, unknown> = { transactionHash };
+      if (eventType) {
+        filter.eventType = eventType;
+      }
+      return await EventLog.findOneAndUpdate(
+        filter,
+        { status: 'processed', processedAt: new Date() },
+        { new: true },
+      );
+    } catch (error) {
+      logger.error('Error marking event as processed:', error);
+      return null;
+    }
+  }
+
   async getUnprocessedEvents(
     page = 1,
     limit = 20,
@@ -74,12 +105,10 @@ export class EventLogService {
       const safeLimit = Math.min(Math.max(1, limit), 100);
       const query = { status: 'pending' };
       const skip = (safePage - 1) * safeLimit;
-
       const [data, total] = await Promise.all([
         EventLog.find(query).sort(sort).skip(skip).limit(safeLimit),
         EventLog.countDocuments(query),
       ]);
-
       return {
         data,
         total,
@@ -93,9 +122,6 @@ export class EventLogService {
     }
   }
 
-  /**
-   * Get events by ledger sequence range
-   */
   async getEventsByLedgerRange(
     startLedger: number,
     endLedger: number,
@@ -115,9 +141,6 @@ export class EventLogService {
     }
   }
 
-  /**
-   * Get event by transaction hash
-   */
   async getEventByTransactionHash(transactionHash: string): Promise<IEventLog | null> {
     try {
       return await EventLog.findOne({ transactionHash });
@@ -127,9 +150,6 @@ export class EventLogService {
     }
   }
 
-  /**
-   * Update event status with error
-   */
   async markEventFailed(eventId: string, errorMessage: string): Promise<IEventLog | null> {
     try {
       const event = await EventLog.findByIdAndUpdate(
@@ -147,9 +167,6 @@ export class EventLogService {
     }
   }
 
-  /**
-   * Get the last processed ledger sequence
-   */
   async getLastProcessedLedger(eventType?: string): Promise<number> {
     try {
       const last = await EventLog.findOne(
